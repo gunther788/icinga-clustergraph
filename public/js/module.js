@@ -291,12 +291,13 @@
                         const p = coords.get(l.source);
                         return {
                             source: {x: p.x - labelOffset - labelWidth.get(l.source) - 5, y: p.y},
-                            target: coords.get(l.target)
+                            target: coords.get(l.target),
+                            child: l.target
                         };
                     });
                 boxes.forEach(box => {
                     const start = {x: box.x0, y: (box.y0 + box.y1) / 2};
-                    box.children.forEach(child => edges.push({source: start, target: coords.get(child)}));
+                    box.children.forEach(child => edges.push({source: start, target: coords.get(child), child}));
                 });
 
                 // Where each host's edges start, for ordering its children
@@ -485,17 +486,26 @@
                 .attr("viewBox", [0, top, width, height])
                 .attr("style", "max-width: 100%; height: auto; font: " + fontSize + "px sans-serif;");
 
-            svg.append("defs").append("marker")
-                .attr("id", "clustergraph-arrow")
-                .attr("viewBox", "0 -5 10 10")
-                .attr("refX", 13)
-                .attr("refY", 0)
-                .attr("markerWidth", 6)
-                .attr("markerHeight", 6)
-                .attr("orient", "auto")
-                .append("path")
-                .attr("d", "M0,-5L10,0L0,5")
-                .attr("fill", "#00c3ed");
+            // Arrows pointing at a child drawn in red (down) are red too
+            const edgeBlue = "#00c3ed";
+            const downRed = "#ff5566";
+            const nodeByName = new Map(nodes.map(n => [n.name, n]));
+            const pointsAtRed = e => stateColor(nodeByName.get(e.child)) === downRed;
+
+            const defs = svg.append("defs");
+            [["clustergraph-arrow", edgeBlue], ["clustergraph-arrow-down", downRed]].forEach(([id, colour]) => {
+                defs.append("marker")
+                    .attr("id", id)
+                    .attr("viewBox", "0 -5 10 10")
+                    .attr("refX", 13)
+                    .attr("refY", 0)
+                    .attr("markerWidth", 6)
+                    .attr("markerHeight", 6)
+                    .attr("orient", "auto")
+                    .append("path")
+                    .attr("d", "M0,-5L10,0L0,5")
+                    .attr("fill", colour);
+            });
 
             // Boxes stay unfilled so an edge from an outer box can be followed
             // across inner ones back to where it starts.
@@ -514,15 +524,16 @@
                 .attr("rx", 7)
                 .attr("ry", 7);
 
+            // Red arrows are drawn last so they stay on top where lines overlap
             svg.append("g")
                 .attr("fill", "none")
-                .attr("stroke", "#00c3ed")
-                .attr("stroke-opacity", 0.5)
                 .attr("stroke-width", 1.6)
                 .selectAll("path")
-                .data(drawnLinks)
+                .data(drawnLinks.slice().sort((a, b) => pointsAtRed(a) - pointsAtRed(b)))
                 .join("path")
-                .attr("marker-end", "url(#clustergraph-arrow)")
+                .attr("stroke", e => pointsAtRed(e) ? downRed : edgeBlue)
+                .attr("stroke-opacity", e => pointsAtRed(e) ? 0.8 : 0.5)
+                .attr("marker-end", e => pointsAtRed(e) ? "url(#clustergraph-arrow-down)" : "url(#clustergraph-arrow)")
                 .attr("d", d3.linkHorizontal()
                     .x(p => p.x)
                     .y(p => p.y));
