@@ -30,6 +30,20 @@
         return node.state === 0 ? "up" : "down";
     }
 
+    // How often to fetch fresh host states while the page is visible
+    const REFRESH_MS = 15000;
+
+    /**
+     * Everything that affects the layout (hosts, their labels and group
+     * membership, and the dependencies), but not host states. If this is
+     * unchanged, a refresh only needs to recolour the existing drawing.
+     */
+    function structureOf(data) {
+        const nodes = (data.nodes || []).map(n => [n.name, n.label, !!n.synthetic, n.link]).sort();
+        const links = (data.links || []).map(l => [l.source, l.target]).sort();
+        return JSON.stringify([nodes, links]);
+    }
+
     /**
      * Lay out a directed acyclic graph in columns (parents left, children right).
      *
@@ -108,7 +122,12 @@
             this.module.on('rendered', this.onRenderedContainer);
         },
 
-        chart: function (data) {
+        /**
+         * Draw the graph. Returns the viewport element, which carries a small API
+         * in viewport.clustergraph for live updates (see onRenderedContainer).
+         * view, if given, is a zoom transform to start from instead of fitting.
+         */
+        chart: function (data, view) {
             const navigation = document.getElementById("navigation");
             const textColor = (navigation && rgbToHex(getComputedStyle(navigation).getPropertyValue('color').trim())) || "#535353";
 
@@ -535,16 +554,12 @@
                 .attr("rx", 7)
                 .attr("ry", 7);
 
-            // Red arrows are drawn last so they stay on top where lines overlap
-            content.append("g")
+            const edgePaths = content.append("g")
                 .attr("fill", "none")
                 .attr("stroke-width", 1.6)
                 .selectAll("path")
-                .data(drawnLinks.slice().sort((a, b) => pointsAtRed(a) - pointsAtRed(b)))
+                .data(drawnLinks)
                 .join("path")
-                .attr("stroke", e => pointsAtRed(e) ? downRed : edgeBlue)
-                .attr("stroke-opacity", e => pointsAtRed(e) ? 0.8 : 0.5)
-                .attr("marker-end", e => pointsAtRed(e) ? "url(#clustergraph-arrow-down)" : "url(#clustergraph-arrow)")
                 .attr("d", d3.linkHorizontal()
                     .x(p => p.x)
                     .y(p => p.y));
@@ -559,25 +574,17 @@
                     return `translate(${p.x},${p.y})`;
                 });
 
-            node.append("title")
-                .text(d => [
-                    d.name,
-                    "state: " + stateName(d),
-                    d.zone ? "zone: " + d.zone : null,
-                    d.synthetic ? null : "not in the synthetic host group"
-                ].filter(Boolean).join("\n"));
+            const titles = node.append("title");
 
-            node.append("circle")
+            const circles = node.append("circle")
                 .attr("r", 5)
-                .attr("fill", d => stateColor(d))
                 .attr("stroke", d => d.synthetic ? "none" : textColor)
                 .attr("stroke-dasharray", "2,2");
 
-            node.append("text")
+            const labels = node.append("text")
                 .attr("x", -labelOffset)
                 .attr("dy", "0.32em")
                 .attr("text-anchor", "end")
-                .attr("fill", d => d.synthetic ? stateColor(d) : textColor)
                 .attr("opacity", d => d.synthetic ? 1 : 0.6)
                 .attr("font-weight", d => d.synthetic ? "bold" : "normal")
                 .attr("font-style", d => d.synthetic ? "normal" : "italic")
@@ -587,7 +594,41 @@
                 .attr("paint-order", "stroke")
                 .text(d => d.label);
 
-            this.addZoom(viewport, svg, zoomLayer, width, height);
+            // Everything that depends on host states, so a refresh can recolour
+            // the drawing in place without touching the layout or the zoom
+            const applyStates = () => {
+                titles.text(d => [
+                    d.name,
+                    "state: " + stateName(d),
+                    d.zone ? "zone: " + d.zone : null,
+                    d.synthetic ? null : "not in the synthetic host group"
+                ].filter(Boolean).join("\n"));
+                circles.attr("fill", d => stateColor(d));
+                labels.attr("fill", d => d.synthetic ? stateColor(d) : textColor);
+                edgePaths
+                    .attr("stroke", e => pointsAtRed(e) ? downRed : edgeBlue)
+                    .attr("stroke-opacity", e => pointsAtRed(e) ? 0.8 : 0.5)
+                    .attr("marker-end", e => pointsAtRed(e) ? "url(#clustergraph-arrow-down)" : "url(#clustergraph-arrow)")
+                    // Red arrows are drawn last so they stay on top where lines overlap
+                    .sort((a, b) => pointsAtRed(a) - pointsAtRed(b));
+            };
+            applyStates();
+
+            const zoomApi = this.addZoom(viewport, svg, zoomLayer, width, height, view);
+            viewport.clustergraph = Object.assign(zoomApi, {
+                structure: structureOf(data),
+                // Copy fresh states onto the drawn hosts and recolour
+                updateStates: fresh => {
+                    (fresh.nodes || []).forEach(n => {
+                        const drawn = nodeByName.get(n.name);
+                        if (!drawn) return;
+                        drawn.state = n.state;
+                        drawn.last_check = n.last_check;
+                        drawn.zone = n.zone;
+                    });
+                    applyStates();
+                }
+            });
             return viewport;
         },
 
@@ -602,7 +643,7 @@
          * resizes. It starts fitted, refits on resize until the user zooms or
          * pans, and always refits when entering or leaving full screen.
          */
-        addZoom: function (viewport, svg, zoomLayer, width, height) {
+        addZoom: function (viewport, svg, zoomLayer, width, height, view) {
             const margin = 40;
             let userMoved = false;
 
@@ -736,20 +777,32 @@
 
             const hint = document.createElement("div");
             hint.className = "clustergraph-hint";
-            hint.textContent = "Drag to move \u00b7 Ctrl/\u2318 + scroll or pinch to zoom";
+            const status = document.createElement("span");
+            hint.append(status, "Drag to move \u00b7 Ctrl/\u2318 + scroll or pinch to zoom");
             viewport.append(hint);
 
-            // Size to the window once the viewport is on the page, then fit; refit
-            // on resize until the user takes over
+            // Size to the window once the viewport is on the page, then fit (or
+            // restore the view carried over from the previous drawing); refit on
+            // resize until the user takes over
             requestAnimationFrame(() => {
                 sizeToWindow();
-                fit(false);
+                if (view) {
+                    svg.call(zoom.transform, view);
+                    userMoved = true;
+                } else {
+                    fit(false);
+                }
             });
             if (window.ResizeObserver) {
                 new ResizeObserver(() => { if (!userMoved) fit(false); }).observe(viewport);
-            } else {
-                requestAnimationFrame(() => fit(false));
             }
+
+            return {
+                isFullscreen,
+                // The current view if the user zoomed or panned, else null (fit)
+                userView: () => userMoved ? d3.zoomTransform(svg.node()) : null,
+                setStatus: text => { status.textContent = text ? text + " \u00b7 " : ""; }
+            };
         },
 
 
@@ -760,13 +813,64 @@
                 return;
             }
 
-            fetch(window.location.pathname + "/index/data")
-                .then(response => response.json())
-                .then(data => {
-                    container.replaceChildren(this.chart(data));
+            const url = window.location.pathname + "/index/data";
+            const load = () => fetch(url, {cache: "no-store", headers: {Accept: "application/json"}})
+                .then(response => {
+                    if (!response.ok) throw new Error("HTTP " + response.status);
+                    return response.json();
                 });
+            const time = () => new Date().toLocaleTimeString();
 
+            // Only one refresh loop at a time, even if Icinga renders us again
+            if (this.stopRefresh) this.stopRefresh();
 
+            load().then(data => {
+                let current = this.chart(data);
+                container.replaceChildren(current);
+                current.clustergraph.setStatus("Updated " + time());
+
+                let busy = false;
+                let timer = null;
+                const stop = () => {
+                    clearInterval(timer);
+                    document.removeEventListener("visibilitychange", onVisible);
+                    if (this.stopRefresh === stop) this.stopRefresh = null;
+                };
+                const refresh = () => {
+                    if (!current.isConnected) {
+                        stop(); // navigated away
+                        return;
+                    }
+                    if (document.hidden || busy) return;
+                    busy = true;
+                    load().then(fresh => {
+                        if (!current.isConnected) return;
+                        const api = current.clustergraph;
+                        // Same hosts and dependencies (or in full screen, where a
+                        // rebuild would drop out of it): just recolour in place.
+                        // A changed structure is picked up after full screen ends.
+                        if (structureOf(fresh) === api.structure || api.isFullscreen()) {
+                            api.updateStates(fresh);
+                        } else {
+                            const next = this.chart(fresh, api.userView());
+                            container.replaceChildren(next);
+                            current = next;
+                        }
+                        current.clustergraph.setStatus("Updated " + time());
+                    }).catch(() => {
+                        if (current.isConnected) current.clustergraph.setStatus("Update failed, retrying");
+                    }).finally(() => { busy = false; });
+                };
+                // Catch up straight away when the tab becomes visible again
+                const onVisible = () => { if (!document.hidden) refresh(); };
+                document.addEventListener("visibilitychange", onVisible);
+                timer = setInterval(refresh, REFRESH_MS);
+                this.stopRefresh = stop;
+            }).catch(error => {
+                const message = document.createElement("p");
+                message.textContent = "Could not load the graph (" + error.message + "). Reload the page to try again.";
+                container.replaceChildren(message);
+            });
         }
     };
 
