@@ -94,7 +94,7 @@ apply Dependency "host-parent" for (parent in host.vars.parents) to Host {
    module name):
 
    ```
-   git clone https://github.com/gunther788/icinga-clustergraph.git /usr/share/icingaweb2/modules/topologygraph
+   git clone https://github.com/gunther788/icinga-topologygraph.git /usr/share/icingaweb2/modules/topologygraph
    ```
 
 2. Enable the module in the Icinga Web 2 web interface, or on the command line:
@@ -150,12 +150,16 @@ If you ran this fork under its old name, `clustergraph`:
    icingacli module disable clustergraph
    ```
 
-2. Rename the module folder and update it:
+2. Rename the module folder, point it at the renamed repository and update it:
 
    ```
    mv /usr/share/icingaweb2/modules/clustergraph /usr/share/icingaweb2/modules/topologygraph
+   git -C /usr/share/icingaweb2/modules/topologygraph remote set-url origin https://github.com/gunther788/icinga-topologygraph.git
    git -C /usr/share/icingaweb2/modules/topologygraph pull
    ```
+
+   GitHub redirects the old `icinga-clustergraph` address, so a pull works without changing the remote, but the new
+   address is safer.
 
 3. Move the settings:
 
@@ -190,8 +194,8 @@ The `tests/` folder has PHP tests for the data the module sends and browser test
 
 ## Contributing
 
-Changes go to https://github.com/gunther788/icinga-clustergraph; the repository keeps its original name. The
-original zone and endpoint graph lives upstream at https://github.com/sol1/icinga-clustergraph.
+Changes go to https://github.com/gunther788/icinga-topologygraph. The original zone and endpoint graph lives
+upstream at https://github.com/sol1/icinga-clustergraph.
 
 ## License
 
