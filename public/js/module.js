@@ -125,6 +125,35 @@
     const BOX_PAD_X = 6;
 
     /**
+     * Place a column of hosts (in this order) as close as possible to their
+     * target heights, keeping at least `gap` between neighbours: least squares
+     * under the ordering constraint, solved by pool-adjacent-violators on
+     * y[i] - i * gap. The result is shifted to stay within [lo, hi] if it can.
+     */
+    function alignColumn(targets, gap, lo, hi) {
+        const blocks = [];
+        targets.forEach((t, i) => {
+            blocks.push({sum: t - i * gap, count: 1});
+            while (blocks.length > 1) {
+                const b = blocks[blocks.length - 1], a = blocks[blocks.length - 2];
+                if (a.sum / a.count <= b.sum / b.count) break;
+                blocks.pop();
+                a.sum += b.sum;
+                a.count += b.count;
+            }
+        });
+        const ys = [];
+        blocks.forEach(b => {
+            for (let k = 0; k < b.count; k++) ys.push(b.sum / b.count + ys.length * gap);
+        });
+        if (!ys.length) return ys;
+        let shift = 0;
+        if (ys[0] < lo) shift = lo - ys[0];
+        else if (ys[ys.length - 1] > hi) shift = Math.max(lo - ys[0], hi - ys[ys.length - 1]);
+        return ys.map(y => y + shift);
+    }
+
+    /**
      * Lay out the graph for a viewport of size avail ({width, height}).
      *
      * Hosts keep their dependency level (column). The rightmost level (hosts
@@ -142,7 +171,11 @@
         const nodeNames = new Set(nodes.map(n => n.name));
         const validLinks = links.filter(l => nodeNames.has(l.source) && nodeNames.has(l.target));
         const childrenOf = new Map(nodes.map(n => [n.name, []]));
-        validLinks.forEach(l => childrenOf.get(l.source).push(l.target));
+        const parentsOf = new Map(nodes.map(n => [n.name, []]));
+        validLinks.forEach(l => {
+            childrenOf.get(l.source).push(l.target);
+            parentsOf.get(l.target).push(l.source);
+        });
         const rightmost = new Set(columns[0]);
 
         // Measure labels so each column leaves room for its text
@@ -254,13 +287,45 @@
             const coords = new Map();
             let x = PADDING;
 
-            // Left levels: deepest first, each centred against maxRows
+            // Left levels: deepest first, each starting centred against maxRows
             for (let col = layerCount - 1; col >= 1; col--) {
                 x += widest(order[col]) + LABEL_OFFSET;
                 const offset = (maxRows - order[col].length) / 2;
                 order[col].forEach((name, i) => coords.set(name, {x, y: rowY(offset + i)}));
                 x += sp.columnGap;
             }
+
+            // Keep arrows horizontal: move each left host towards the (median)
+            // height of the hosts it connects to (anchorOf gives where a
+            // neighbour's arrows start or end), keeping the row order and at
+            // least one row between hosts. Alternate directions a few times so
+            // alignment can travel along chains.
+            const alignLeft = (anchorOf, rounds) => {
+                const lo = rowY(0), hi = rowY(maxRows - 1);
+                const target = name => {
+                    const ys = parentsOf.get(name).concat(childrenOf.get(name))
+                        .map(anchorOf).filter(y => y !== undefined);
+                    // Line the host up exactly with one neighbour: the median, or
+                    // with an even count whichever middle value is nearer to where
+                    // the host is now (an average would slope all of its arrows)
+                    const own = coords.get(name).y;
+                    if (!ys.length) return own;
+                    ys.sort((a, b) => a - b);
+                    const mid = ys.length >> 1;
+                    if (ys.length % 2) return ys[mid];
+                    return Math.abs(ys[mid - 1] - own) <= Math.abs(ys[mid] - own) ? ys[mid - 1] : ys[mid];
+                };
+                const alignOne = col => {
+                    const ys = alignColumn(order[col].map(target), sp.rowHeight, lo, hi);
+                    order[col].forEach((name, i) => coords.get(name).y = ys[i]);
+                };
+                for (let round = 0; round < rounds; round++) {
+                    for (let col = 1; col < layerCount; col++) alignOne(col);
+                    for (let col = layerCount - 1; col >= 1; col--) alignOne(col);
+                }
+            };
+            // First among the left levels only (rightmost groups aren't placed yet)
+            alignLeft(name => rightmost.has(name) ? undefined : coords.get(name).y, 3);
 
             // Rightmost level: put each group at the height of its children,
             // in whichever sub-column lets it sit closest to that height
@@ -323,6 +388,23 @@
             linkedGroups.forEach(group => group.placed = null);
             subColumns.forEach((column, k) => column.groups.forEach(g => g.group.placed = {k, start: g.start}));
 
+            // Then line the left levels up with the boxes that now point at them
+            // (a box's arrows leave from its middle)
+            // (a box's arrows leave from its middle). Boxes sit on the row grid;
+            // first let each one slide up to 0.4 of a row towards the median
+            // height of its children, so a single arrow can come out level. The
+            // blank row between boxes keeps them apart.
+            const boxMiddle = new Map();
+            subColumns.forEach(column => column.groups.forEach(placedGroup => {
+                const {group, start} = placedGroup;
+                const middle = rowY(start + (group.names.length - 1) / 2);
+                const want = d3.median(group.children, child => coords.get(child).y);
+                const limit = 0.4 * sp.rowHeight;
+                placedGroup.offset = Math.max(-limit, Math.min(limit, want - middle));
+                group.names.forEach(name => boxMiddle.set(name, middle + placedGroup.offset));
+            }));
+            alignLeft(name => rightmost.has(name) ? boxMiddle.get(name) : coords.get(name).y, 2);
+
             // Hosts with no children go last, in sub-columns of their own
             for (let i = 0; i < looseNames.length; i += maxRows) {
                 const names = looseNames.slice(i, i + maxRows);
@@ -335,15 +417,15 @@
             subColumns.forEach((column, k) => {
                 if (k > 0) x += sp.subColumnGap;
                 x += widest([].concat(...column.groups.map(g => g.group.names))) + LABEL_OFFSET;
-                column.groups.forEach(({group, start}) => {
-                    group.names.forEach((name, i) => coords.set(name, {x, y: rowY(start + i)}));
+                column.groups.forEach(({group, start, offset = 0}) => {
+                    group.names.forEach((name, i) => coords.set(name, {x, y: rowY(start + i) + offset}));
                     boxes.push({
                         names: group.names,
                         children: group.children,
                         x0: x - LABEL_OFFSET - widest(group.names) - BOX_PAD_X,
                         x1: x + 5 + BOX_PAD_X,
-                        y0: rowY(start) - BASE.rowHeight / 2 + 2,
-                        y1: rowY(start + group.names.length - 1) + BASE.rowHeight / 2 - 2
+                        y0: rowY(start) + offset - BASE.rowHeight / 2 + 2,
+                        y1: rowY(start + group.names.length - 1) + offset + BASE.rowHeight / 2 - 2
                     });
                 });
             });
@@ -444,8 +526,6 @@
         };
 
         if (layerCount > 1) {
-            const parentsOf = new Map(nodes.map(n => [n.name, []]));
-            validLinks.forEach(l => parentsOf.get(l.target).push(l.source));
             const sortBy = (col, neighbours) => {
                 const geo = place(order);
                 const key = new Map(order[col].map(name => {
@@ -563,38 +643,31 @@
     }
 
     /**
-     * Hosts at the bottom of the hierarchy (no children, at least one parent),
-     * for the subset picker: those in the leftmost column first, then the rest.
+     * Hosts without children, for the subset picker, sorted by label.
      */
-    function bottomHosts(data) {
+    function hostsWithoutChildren(data) {
         const nodes = data.nodes || [];
         const names = new Set(nodes.map(n => n.name));
-        const links = (data.links || []).filter(l => names.has(l.source) && names.has(l.target));
-        const hasChildren = new Set(links.map(l => l.source));
-        const hasParents = new Set(links.map(l => l.target));
-        const bottom = nodes.filter(n => hasParents.has(n.name) && !hasChildren.has(n.name));
-        if (!bottom.length) return {leftmost: [], other: []};
-        const {columns} = layout(nodes, links);
-        const leftmost = new Set(columns[columns.length - 1]);
-        const byLabel = (a, b) => d3.ascending(a.label, b.label);
-        return {
-            leftmost: bottom.filter(n => leftmost.has(n.name)).sort(byLabel),
-            other: bottom.filter(n => !leftmost.has(n.name)).sort(byLabel)
-        };
+        const hasChildren = new Set((data.links || [])
+            .filter(l => names.has(l.source) && names.has(l.target))
+            .map(l => l.source));
+        return nodes
+            .filter(n => !hasChildren.has(n.name))
+            .sort((a, b) => d3.ascending(a.label, b.label));
     }
 
     /**
-     * The part of the graph above one host: the host, its parents, their
-     * parents and so on, with the dependencies between them.
+     * The part of the graph above some hosts: those hosts, their parents,
+     * their parents' parents and so on, with the dependencies between them.
      */
-    function subsetAbove(data, name) {
+    function subsetAbove(data, names) {
         const parentsOf = new Map();
         (data.links || []).forEach(l => {
             if (!parentsOf.has(l.target)) parentsOf.set(l.target, []);
             parentsOf.get(l.target).push(l.source);
         });
-        const keep = new Set([name]);
-        const queue = [name];
+        const keep = new Set(names);
+        const queue = [...names];
         while (queue.length) {
             (parentsOf.get(queue.shift()) || []).forEach(parent => {
                 if (!keep.has(parent)) {
@@ -609,23 +682,23 @@
         };
     }
 
-    const FOCUS_KEY = "clustergraph-focus";
-    const readFocus = () => {
-        try {
-            return window.localStorage.getItem(FOCUS_KEY) || null;
-        } catch (e) {
-            return null;
+    // The selected hosts live in the page URL (?host=a&host=b), so a subset can
+    // be bookmarked or shared
+    const URL_PARAM = "host";
+    const readSelection = () => new URLSearchParams(window.location.search).getAll(URL_PARAM);
+    const writeSelection = (names, container) => {
+        const url = new URL(window.location.href);
+        url.searchParams.delete(URL_PARAM);
+        names.forEach(name => url.searchParams.append(URL_PARAM, name));
+        if (url.href !== window.location.href) {
+            // Replace rather than push: Icinga keeps its own history entries,
+            // and its state object is kept as it is
+            window.history.replaceState(window.history.state, "", url.href);
         }
-    };
-    const saveFocus = value => {
-        try {
-            if (value) {
-                window.localStorage.setItem(FOCUS_KEY, value);
-            } else {
-                window.localStorage.removeItem(FOCUS_KEY);
-            }
-        } catch (e) {
-            // Storage unavailable (private mode etc.): the choice just isn't remembered
+        // Icinga reloads a column from its data-icinga-url; keep that in step
+        const column = container.closest("[data-icinga-url]");
+        if (column && column.getAttribute("data-icinga-url") !== url.pathname + url.search) {
+            column.setAttribute("data-icinga-url", url.pathname + url.search);
         }
     };
 
@@ -819,11 +892,11 @@
             // --- Data, subset and drawing ---------------------------------------
 
             let fullData = {nodes: [], links: []};
-            let focus = readFocus();
+            let selected = readSelection(); // host names; empty means all hosts
             let drawn = null; // {structure, update(data)} for what is on screen
             let laidOutFor = {width: 0, height: 0};
 
-            const visibleData = () => focus ? subsetAbove(fullData, focus) : fullData;
+            const visibleData = () => selected.length ? subsetAbove(fullData, selected) : fullData;
 
             const draw = view => {
                 const data = visibleData();
@@ -952,47 +1025,94 @@
             const controls = document.createElement("div");
             controls.className = "clustergraph-controls";
 
-            // Subset picker: one bottom-level host and everything above it
-            const picker = document.createElement("select");
-            picker.title = "Show one host at the bottom of the hierarchy and everything above it";
-            picker.addEventListener("change", () => {
-                focus = picker.value || null;
-                saveFocus(focus);
+            // Subset picker: tick one or more hosts without children to show
+            // only them and everything above them
+            const pickerButton = document.createElement("button");
+            pickerButton.type = "button";
+            pickerButton.className = "clustergraph-picker-button";
+            pickerButton.title = "Show only some hosts and everything above them";
+            const panel = document.createElement("div");
+            panel.className = "clustergraph-picker";
+            panel.hidden = true;
+            const filter = document.createElement("input");
+            filter.type = "search";
+            filter.placeholder = "Filter hosts";
+            const showAll = document.createElement("button");
+            showAll.type = "button";
+            showAll.textContent = "Show all";
+            const panelHead = document.createElement("div");
+            panelHead.className = "clustergraph-picker-head";
+            panelHead.append(filter, showAll);
+            const list = document.createElement("div");
+            list.className = "clustergraph-picker-list";
+            panel.append(panelHead, list);
+
+            const applySelection = () => {
+                pickerButton.textContent = selected.length === 0 ? "All hosts \u25be"
+                    : selected.length === 1 ? (fullData.nodes.find(n => n.name === selected[0]) || {label: selected[0]}).label + " \u25be"
+                    : selected.length + " hosts \u25be";
+                list.querySelectorAll("input").forEach(box => box.checked = selected.includes(box.value));
+                writeSelection(selected, container);
+            };
+            const choose = names => {
+                selected = names;
+                applySelection();
                 draw(null);
-            });
+            };
+
             let pickerFor = null;
             const updatePicker = () => {
                 const structure = structureOf(fullData);
                 if (structure !== pickerFor) {
                     pickerFor = structure;
-                    const {leftmost, other} = bottomHosts(fullData);
-                    const all = document.createElement("option");
-                    all.value = "";
-                    all.textContent = "All hosts";
-                    const groups = [[leftmost, "Leftmost column"], [other, "Other hosts without children"]]
-                        .filter(([list]) => list.length)
-                        .map(([list, label]) => {
-                            const group = document.createElement("optgroup");
-                            group.label = label;
-                            list.forEach(n => {
-                                const option = document.createElement("option");
-                                option.value = n.name;
-                                option.textContent = n.label;
-                                group.append(option);
-                            });
-                            return group;
-                        });
-                    picker.replaceChildren(all, ...groups);
-                    picker.hidden = !groups.length;
+                    const hosts = hostsWithoutChildren(fullData);
+                    list.replaceChildren(...hosts.map(n => {
+                        const row = document.createElement("label");
+                        const box = document.createElement("input");
+                        box.type = "checkbox";
+                        box.value = n.name;
+                        row.append(box, " " + n.label);
+                        row.dataset.filter = (n.label + " " + n.name).toLowerCase();
+                        return row;
+                    }));
+                    pickerButton.hidden = !hosts.length;
+                    filterList();
                 }
-                // Forget a chosen host that is no longer at the bottom of the graph
-                if (focus && !picker.querySelector(`option[value="${CSS.escape(focus)}"]`)) {
-                    focus = null;
-                    saveFocus(null);
-                }
-                picker.value = focus || "";
+                // Drop selected hosts that are gone or now have children
+                const available = new Set([...list.querySelectorAll("input")].map(box => box.value));
+                selected = selected.filter(name => available.has(name));
+                applySelection();
             };
-            controls.append(picker);
+            const filterList = () => {
+                const text = filter.value.trim().toLowerCase();
+                list.querySelectorAll("label").forEach(row => row.hidden = !!text && !row.dataset.filter.includes(text));
+            };
+
+            list.addEventListener("change", () => {
+                choose([...list.querySelectorAll("input:checked")].map(box => box.value));
+            });
+            filter.addEventListener("input", filterList);
+            showAll.addEventListener("click", () => choose([]));
+            const closePanel = () => { panel.hidden = true; };
+            pickerButton.addEventListener("click", event => {
+                event.preventDefault();
+                panel.hidden = !panel.hidden;
+                if (!panel.hidden) filter.focus();
+            });
+            // Close when clicking elsewhere or pressing Escape
+            const onOutsideClick = event => {
+                if (!viewport.isConnected) {
+                    document.removeEventListener("mousedown", onOutsideClick, true);
+                    return;
+                }
+                if (!panel.hidden && !panel.contains(event.target) && event.target !== pickerButton) closePanel();
+            };
+            // Capture phase: the zoom behaviour stops mousedown on the diagram
+            // from bubbling up to the document
+            document.addEventListener("mousedown", onOutsideClick, true);
+            panel.addEventListener("keydown", event => { if (event.key === "Escape") closePanel(); });
+            controls.append(pickerButton);
+            viewport.append(panel);
 
             const isFullscreen = () =>
                 (document.fullscreenElement || document.webkitFullscreenElement) === viewport;
