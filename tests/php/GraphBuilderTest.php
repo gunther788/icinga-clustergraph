@@ -8,26 +8,9 @@
  * Exits non-zero if any check fails.
  */
 
-require __DIR__ . '/../../library/Clustergraph/Common/GraphBuilder.php';
+require __DIR__ . '/lib.php';
 
 use Icinga\Module\Clustergraph\Common\GraphBuilder;
-
-$failures = 0;
-$checks = 0;
-
-function check($description, $actual, $expected)
-{
-    global $failures, $checks;
-    $checks++;
-    if ($actual === $expected) {
-        echo "ok    $description\n";
-    } else {
-        $failures++;
-        echo "FAIL  $description\n";
-        echo "      expected: " . json_encode($expected) . "\n";
-        echo "      actual:   " . json_encode($actual) . "\n";
-    }
-}
 
 function host($name, array $attrs = [])
 {
@@ -123,5 +106,4 @@ check('build: links passed through', $graph['links'], $selection['links']);
 $withoutServices = GraphBuilder::build($selection, $hosts, null, '/x?host=');
 check('build: services null when they could not be fetched', $withoutServices['nodes'][0]['services'], null);
 
-echo "\n$checks checks, $failures failed\n";
-exit($failures ? 1 : 0);
+finish();

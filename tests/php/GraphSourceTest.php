@@ -1,0 +1,107 @@
+<?php
+
+/**
+ * Tests for GraphSource: which API requests are made, with which filters,
+ * and how their results are combined. Run with: php tests/php/GraphSourceTest.php
+ */
+
+require __DIR__ . '/lib.php';
+
+use Icinga\Module\Clustergraph\Common\GraphSource;
+
+/**
+ * A fake Icinga API: answers each request from $answers by its kind
+ * (hosts / dependencies / services) and records the requests made.
+ */
+function fakeApi(array $answers, array &$requests)
+{
+    return function ($endpoint, $body) use ($answers, &$requests) {
+        $kind = explode('?', substr($endpoint, strlen('objects/')))[0];
+        $requests[] = ['kind' => $kind, 'filter' => $body['filter'], 'vars' => $body['filter_vars']];
+        $answer = $answers[$kind];
+        if ($answer instanceof \Exception) {
+            throw $answer;
+        }
+        return is_callable($answer) ? $answer($body) : $answer;
+    };
+}
+
+function host($name, array $attrs = [])
+{
+    return ['name' => $name, 'attrs' => $attrs + ['display_name' => $name, 'groups' => [], 'state' => 0, 'last_check' => 1]];
+}
+
+$answers = [
+    'hosts' => function ($body) {
+        // First request: the group; second: neighbours by name
+        if ($body['filter'] === 'group in host.groups') {
+            return [host('probe-a', ['groups' => ['web-checks']]), host('probe-b', ['groups' => ['web-checks']])];
+        }
+        return array_map('host', $body['filter_vars']['names']);
+    },
+    'dependencies' => [
+        ['attrs' => ['parent_host_name' => 'probe-a', 'child_host_name' => 'web-1', 'child_service_name' => '']],
+        ['attrs' => ['parent_host_name' => 'probe-b', 'child_host_name' => 'web-1', 'child_service_name' => '']]
+    ],
+    'services' => [
+        ['attrs' => ['host_name' => 'web-1', 'state' => 2, 'last_check' => 1]]
+    ]
+];
+
+$requests = [];
+$graph = GraphSource::fetch(fakeApi($answers, $requests), 'web-checks', '/host?name=');
+$names = array_column($graph['nodes'], 'name');
+sort($names);
+
+check('requests: group hosts, dependencies, neighbours, services', array_column($requests, 'kind'),
+    ['hosts', 'dependencies', 'hosts', 'services']);
+check('group hosts are filtered on the Icinga side', [$requests[0]['filter'], $requests[0]['vars']],
+    ['group in host.groups', ['group' => 'web-checks']]);
+check('dependencies: host-to-host ones touching the group', [$requests[1]['filter'], $requests[1]['vars']], [
+    'dependency.child_service_name == "" && (dependency.parent_host_name in names || dependency.child_host_name in names)',
+    ['names' => ['probe-a', 'probe-b']]
+]);
+check('only the neighbour outside the group is fetched by name', $requests[2]['vars'], ['names' => ['web-1']]);
+check('services are fetched for every drawn host', $requests[3]['vars'], ['names' => ['probe-a', 'probe-b', 'web-1']]);
+check('graph has the group hosts and their neighbour', $names, ['probe-a', 'probe-b', 'web-1']);
+check('links from the dependencies', count($graph['links']), 2);
+check('neighbour carries its service summary', $graph['nodes'][2]['services']['worst_unhandled'], 'critical');
+check('group membership', array_column($graph['nodes'], 'synthetic'), [true, true, false]);
+
+// An empty group: one request, empty graph
+$requests = [];
+$empty = GraphSource::fetch(fakeApi(['hosts' => []] + $answers, $requests), 'nobody', '/host?name=');
+check('empty group: only the group request is made', array_column($requests, 'kind'), ['hosts']);
+check('empty group: empty graph', $empty, ['nodes' => [], 'links' => []]);
+
+// No neighbours outside the group: no neighbour request
+$requests = [];
+GraphSource::fetch(fakeApi(['dependencies' => []] + $answers, $requests), 'web-checks', '/host?name=');
+check('no neighbours: no neighbour request', array_column($requests, 'kind'), ['hosts', 'dependencies', 'services']);
+
+// Services failing (e.g. no permission): graph without service details, error reported
+$requests = [];
+$reported = null;
+$withoutServices = GraphSource::fetch(
+    fakeApi(['services' => new \RuntimeException('403 Forbidden')] + $answers, $requests),
+    'web-checks',
+    '/host?name=',
+    function ($e) use (&$reported) {
+        $reported = $e->getMessage();
+    }
+);
+check('services failing: still drawn', count($withoutServices['nodes']), 3);
+check('services failing: marked unavailable', $withoutServices['nodes'][0]['services'], null);
+check('services failing: error reported', $reported, '403 Forbidden');
+
+// Hosts failing is an error for the caller
+$thrown = null;
+try {
+    $requests = [];
+    GraphSource::fetch(fakeApi(['hosts' => new \RuntimeException('connection refused')] + $answers, $requests), 'x', '/');
+} catch (\RuntimeException $e) {
+    $thrown = $e->getMessage();
+}
+check('hosts failing: passed on', $thrown, 'connection refused');
+
+finish();
