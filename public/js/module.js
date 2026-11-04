@@ -617,23 +617,25 @@
             return {top: minY - PADDING, height: maxY - minY + 2 * PADDING + 8, rows: maxY - minY};
         };
 
-        // Spread out: widen the gaps between columns and between rows so the
-        // diagram fills the viewport at 100% (within limits that keep it tidy)
+        // Spread out a little where there is room, so arrows between levels
+        // and rows aren't cramped, but keep it compact: the lists of boxes in
+        // the rightmost level stay at their normal distance, rows stretch to at
+        // most 1.25x and the gaps between levels to at most 1.75x. On a large
+        // screen the rest is left as margin around the (centred) diagram
+        // rather than pulling the lists apart.
         let geo = bestGeo;
         if (avail && avail.width > 0 && avail.height > 0) {
             const sp = Object.assign({}, BASE);
-            const gaps = (layerCount - 1) * BASE.columnGap + Math.max(0, geo.subColumnCount - 1) * BASE.subColumnGap;
+            const levelGaps = (layerCount - 1) * BASE.columnGap;
             const extraWidth = avail.width - geo.width;
-            if (extraWidth > 0 && gaps > 0) {
-                const factor = Math.min(4, 1 + extraWidth / gaps);
-                sp.columnGap = BASE.columnGap * factor;
-                sp.subColumnGap = BASE.subColumnGap * factor;
+            if (extraWidth > 0 && levelGaps > 0) {
+                sp.columnGap = BASE.columnGap * Math.min(1.75, 1 + extraWidth / levelGaps);
             }
             const size = extent(geo);
             const rowSteps = size.rows / BASE.rowHeight;
             const extraHeight = avail.height - size.height;
             if (extraHeight > 0 && rowSteps >= 1) {
-                sp.rowHeight = Math.min(2 * BASE.rowHeight, BASE.rowHeight + extraHeight / rowSteps);
+                sp.rowHeight = Math.min(1.25 * BASE.rowHeight, BASE.rowHeight + extraHeight / rowSteps);
             }
             geo = place(bestOrder, bestSpread, bestPinned, sp);
         }
