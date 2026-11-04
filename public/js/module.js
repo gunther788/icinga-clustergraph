@@ -123,7 +123,7 @@
 
             const {columns, layerCount} = layout(nodes, links);
 
-            const fontSize = 13;
+            const fontSize = 12;
             const rowHeight = 24;
             const padding = 16;
             const labelOffset = 10; // circle centre to the end of its label (labels sit left of the dot)
@@ -480,11 +480,16 @@
                 }
             }
 
-            const svg = d3.create("svg")
-                .attr("width", width)
-                .attr("height", height)
-                .attr("viewBox", [0, top, width, height])
-                .attr("style", "max-width: 100%; height: auto; font: " + fontSize + "px sans-serif;");
+            // The diagram sits in a viewport that can be zoomed and panned. The
+            // viewport is as tall as the diagram at 100%, up to 75% of the window.
+            const viewport = document.createElement("div");
+            viewport.className = "clustergraph-viewport";
+            viewport.style.height = `min(${Math.ceil(height)}px, 75vh)`;
+
+            const svg = d3.select(viewport).append("svg")
+                .attr("width", "100%")
+                .attr("height", "100%")
+                .attr("style", "display: block; touch-action: none; font: " + fontSize + "px sans-serif;");
 
             // Arrows pointing at a child drawn in red (down) are red too
             const edgeBlue = "#00c3ed";
@@ -493,6 +498,10 @@
             const pointsAtRed = e => stateColor(nodeByName.get(e.child)) === downRed;
 
             const defs = svg.append("defs");
+            // zoomLayer carries the zoom/pan transform; content shifts the drawing
+            // so its cropped top edge sits at y = 0.
+            const zoomLayer = svg.append("g");
+            const content = zoomLayer.append("g").attr("transform", `translate(0,${-top})`);
             [["clustergraph-arrow", edgeBlue], ["clustergraph-arrow-down", downRed]].forEach(([id, colour]) => {
                 defs.append("marker")
                     .attr("id", id)
@@ -509,7 +518,7 @@
 
             // Boxes stay unfilled so an edge from an outer box can be followed
             // across inner ones back to where it starts.
-            svg.append("g")
+            content.append("g")
                 .attr("fill", "none")
                 .attr("stroke", textColor)
                 .attr("stroke-opacity", 0.45)
@@ -525,7 +534,7 @@
                 .attr("ry", 7);
 
             // Red arrows are drawn last so they stay on top where lines overlap
-            svg.append("g")
+            content.append("g")
                 .attr("fill", "none")
                 .attr("stroke-width", 1.6)
                 .selectAll("path")
@@ -538,7 +547,7 @@
                     .x(p => p.x)
                     .y(p => p.y));
 
-            const node = svg.append("g")
+            const node = content.append("g")
                 .selectAll("a")
                 .data(nodes)
                 .join("a")
@@ -576,7 +585,104 @@
                 .attr("paint-order", "stroke")
                 .text(d => d.label);
 
-            return svg.node();
+            this.addZoom(viewport, svg, zoomLayer, width, height);
+            return viewport;
+        },
+
+        /**
+         * Zoom and pan for the diagram:
+         * - drag to move, pinch or Ctrl/Cmd + scroll to zoom
+         * - plain scrolling moves the diagram while it has somewhere to go, and
+         *   otherwise scrolls the page as usual
+         * - buttons to zoom in, zoom out, fit the whole diagram and show 100%
+         * It starts fitted, and keeps refitting on resize until the user zooms or pans.
+         */
+        addZoom: function (viewport, svg, zoomLayer, width, height) {
+            const margin = 40;
+            let userMoved = false;
+
+            const zoom = d3.zoom()
+                .scaleExtent([0.1, 4])
+                .translateExtent([[-margin, -margin], [width + margin, height + margin]])
+                // Wheel zooms only with Ctrl/Cmd (trackpad pinch sends ctrlKey too)
+                .filter(event => event.type === "wheel" ? (event.ctrlKey || event.metaKey) : !event.button)
+                // Gentle steps for a mouse wheel; trackpad pinches send small
+                // deltas, so those get boosted to feel natural
+                .wheelDelta(event => {
+                    const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode ? 100 : 1);
+                    return -delta * 0.002 * (Math.abs(delta) < 40 ? 5 : 1);
+                })
+                .on("zoom", event => {
+                    zoomLayer.attr("transform", event.transform);
+                    if (event.sourceEvent) userMoved = true;
+                });
+            svg.call(zoom).on("dblclick.zoom", null);
+
+            // Plain wheel / two-finger scroll pans the diagram
+            svg.on("wheel.pan", event => {
+                if (event.ctrlKey || event.metaKey) return;
+                const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? viewport.clientHeight : 1;
+                const dx = (event.shiftKey && !event.deltaX ? event.deltaY : event.deltaX) * unit;
+                const dy = (event.shiftKey && !event.deltaX ? 0 : event.deltaY) * unit;
+                const before = d3.zoomTransform(svg.node());
+                zoom.translateBy(svg, -dx / before.k, -dy / before.k);
+                const after = d3.zoomTransform(svg.node());
+                // Only keep the scroll if the diagram actually moved; at its edges
+                // the page scrolls instead
+                if (Math.abs(after.x - before.x) > 0.5 || Math.abs(after.y - before.y) > 0.5) {
+                    userMoved = true;
+                    event.preventDefault();
+                }
+            }, {passive: false});
+
+            const fitTransform = () => {
+                const vw = viewport.clientWidth, vh = viewport.clientHeight;
+                const k = Math.min(vw / width, vh / height, 1);
+                // Left-aligned like the page, centred vertically
+                return d3.zoomIdentity.translate(0, (vh - height * k) / 2).scale(k);
+            };
+            const fit = animate => {
+                if (!viewport.clientWidth || !viewport.clientHeight) return;
+                (animate ? svg.transition().duration(250) : svg).call(zoom.transform, fitTransform());
+                userMoved = false;
+            };
+
+            const controls = document.createElement("div");
+            controls.className = "clustergraph-controls";
+            [
+                ["+", "Zoom in", () => svg.transition().duration(200).call(zoom.scaleBy, 1.4)],
+                ["\u2212", "Zoom out", () => svg.transition().duration(200).call(zoom.scaleBy, 1 / 1.4)],
+                ["Fit", "Fit the whole diagram", () => fit(true)],
+                ["1:1", "Show at 100%", () => {
+                    const t = d3.zoomTransform(svg.node());
+                    svg.transition().duration(250).call(zoom.scaleBy, 1 / t.k);
+                }]
+            ].forEach(([label, title, action]) => {
+                const button = document.createElement("button");
+                button.type = "button";
+                button.textContent = label;
+                button.title = title;
+                button.addEventListener("click", event => {
+                    event.preventDefault();
+                    userMoved = true;
+                    action();
+                });
+                controls.append(button);
+            });
+            viewport.append(controls);
+
+            const hint = document.createElement("div");
+            hint.className = "clustergraph-hint";
+            hint.textContent = "Drag to move \u00b7 Ctrl/\u2318 + scroll or pinch to zoom";
+            viewport.append(hint);
+
+            // Fit once the viewport has a size, and again on resize until the
+            // user takes over
+            if (window.ResizeObserver) {
+                new ResizeObserver(() => { if (!userMoved) fit(false); }).observe(viewport);
+            } else {
+                requestAnimationFrame(() => fit(false));
+            }
         },
 
 

@@ -12,3 +12,55 @@
   text-decoration: none;
   text-rendering: optimizeLegibility;
 }
+
+// Zoomable viewport around the diagram
+.clustergraph-viewport {
+  position: relative;
+  width: 100%;
+  min-height: 120px;
+  overflow: hidden;
+  cursor: grab;
+  border: 1px solid rgba(128, 128, 128, 0.25);
+  border-radius: 4px;
+
+  &:active {
+    cursor: grabbing;
+  }
+
+  a {
+    cursor: pointer;
+  }
+}
+
+.clustergraph-controls {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  gap: 4px;
+
+  button {
+    min-width: 2.2em;
+    padding: 2px 6px;
+    font-size: 12px;
+    line-height: 1.4;
+    color: inherit;
+    background: rgba(128, 128, 128, 0.2);
+    border: 1px solid rgba(128, 128, 128, 0.45);
+    border-radius: 3px;
+    cursor: pointer;
+
+    &:hover {
+      background: rgba(128, 128, 128, 0.35);
+    }
+  }
+}
+
+.clustergraph-hint {
+  position: absolute;
+  right: 8px;
+  bottom: 4px;
+  font-size: 11px;
+  opacity: 0.6;
+  pointer-events: none;
+}
