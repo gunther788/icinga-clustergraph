@@ -20,8 +20,6 @@
   min-height: 120px;
   overflow: hidden;
   cursor: grab;
-  border: 1px solid rgba(128, 128, 128, 0.25);
-  border-radius: 4px;
 
   &:active {
     cursor: grabbing;
@@ -30,8 +28,6 @@
   &:fullscreen {
     width: 100vw;
     height: 100vh;
-    border: 0;
-    border-radius: 0;
   }
 
   a {
@@ -46,7 +42,8 @@
   display: flex;
   gap: 4px;
 
-  button {
+  button,
+  select {
     min-width: 2.2em;
     padding: 2px 6px;
     font-size: 12px;
@@ -61,6 +58,27 @@
       background: rgba(128, 128, 128, 0.35);
     }
   }
+
+  select {
+    max-width: 16em;
+  }
+
+  // Native dropdown lists ignore the translucent background; keep them legible
+  option,
+  optgroup {
+    color: #222;
+    background: #fff;
+  }
+}
+
+.clustergraph-empty {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  margin: 0;
+  text-align: center;
+  opacity: 0.7;
 }
 
 .clustergraph-hint {

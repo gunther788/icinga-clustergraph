@@ -116,147 +116,193 @@
         return {columns, layer, position, layerCount};
     }
 
-    Clustergraph.prototype = {
+    // Drawing constants. BASE spacing is the tightest layout; it is widened to
+    // fill the window when there is room (see computeLayout).
+    const FONT_SIZE = 12;
+    const BASE = {rowHeight: 24, columnGap: 90, subColumnGap: 40};
+    const PADDING = 16;
+    const LABEL_OFFSET = 10; // circle centre to the end of its label (labels sit left of the dot)
+    const BOX_PAD_X = 6;
 
-        initialize: function () {
-            this.module.on('rendered', this.onRenderedContainer);
-        },
+    /**
+     * Lay out the graph for a viewport of size avail ({width, height}).
+     *
+     * Hosts keep their dependency level (column). The rightmost level (hosts
+     * with no parents) is wrapped into side-by-side sub-columns, with hosts that
+     * are parents of the same children kept together as one boxed group. The
+     * height of those sub-columns is chosen so the diagram's shape matches the
+     * viewport's, then rows are ordered to minimise crossing arrows, and finally
+     * the gaps are widened so the diagram fills the viewport at 100%.
+     *
+     * Returns {coords, boxes, edges, width, height, top}.
+     */
+    function computeLayout(nodes, links, avail) {
+        const {columns, layerCount} = layout(nodes, links);
+
+        const nodeNames = new Set(nodes.map(n => n.name));
+        const validLinks = links.filter(l => nodeNames.has(l.source) && nodeNames.has(l.target));
+        const childrenOf = new Map(nodes.map(n => [n.name, []]));
+        validLinks.forEach(l => childrenOf.get(l.source).push(l.target));
+        const rightmost = new Set(columns[0]);
+
+        // Measure labels so each column leaves room for its text
+        const ctx = document.createElement("canvas").getContext("2d");
+        const labelWidth = new Map(nodes.map(n => {
+            ctx.font = (n.synthetic ? "bold" : "italic") + " " + FONT_SIZE + "px sans-serif";
+            return [n.name, ctx.measureText(n.label).width];
+        }));
+        const widest = names => Math.max(0, ...names.map(name => labelWidth.get(name)));
+
+        // Rightmost hosts grouped by their exact set of children
+        const groupsByKey = new Map();
+        columns[0].forEach(name => {
+            const key = childrenOf.get(name).slice().sort().join("\0");
+            if (!groupsByKey.has(key)) groupsByKey.set(key, []);
+            groupsByKey.get(key).push(name);
+        });
+        const rawGroups = [];
+        let looseNames = [];
+        groupsByKey.forEach((names, key) => {
+            names.sort((a, b) => d3.ascending(a, b));
+            if (key === "") {
+                looseNames = names;
+            } else {
+                rawGroups.push({names, children: key.split("\0")});
+            }
+        });
+
+        // Choose the height of the rightmost sub-columns (in rows). Estimate the
+        // diagram's size for each candidate and take the one that shows it
+        // largest (up to 100%) in the viewport; among those that fit at 100%,
+        // the one whose shape is closest to the viewport's.
+        const otherMax = Math.max(0, ...columns.slice(1).map(c => c.length));
+        let leftWidth = 0;
+        for (let col = layerCount - 1; col >= 1; col--) {
+            leftWidth += widest(columns[col]) + LABEL_OFFSET + BASE.columnGap;
+        }
+        const estimate = rows => {
+            const subs = [];
+            let current = null;
+            rawGroups.forEach(group => {
+                for (let i = 0; i < group.names.length; i += rows) {
+                    const piece = group.names.slice(i, i + rows);
+                    const need = (current && current.used ? 1 : 0) + piece.length;
+                    if (!current || current.used + need > rows) {
+                        current = {used: 0, names: []};
+                        subs.push(current);
+                    }
+                    current.used += current.used ? 1 + piece.length : piece.length;
+                    current.names.push(...piece);
+                }
+            });
+            for (let i = 0; i < looseNames.length; i += rows) {
+                const chunk = looseNames.slice(i, i + rows);
+                subs.push({used: chunk.length, names: chunk});
+            }
+            const rightWidth = d3.sum(subs, s => widest(s.names) + LABEL_OFFSET)
+                + Math.max(0, subs.length - 1) * BASE.subColumnGap;
+            const usedRows = Math.max(otherMax, ...subs.map(s => s.used));
+            return {
+                linkedSubColumns: subs.length - Math.ceil(looseNames.length / rows),
+                width: PADDING + leftWidth + rightWidth + 5 + BOX_PAD_X + PADDING,
+                height: 2 * PADDING + Math.max(0, usedRows - 1) * BASE.rowHeight + 8
+            };
+        };
+        const neededRows = d3.sum(rawGroups, g => g.names.length) + Math.max(0, rawGroups.length - 1);
+        const lowest = Math.max(layerCount > 1 ? otherMax : 1, 2);
+        const highest = Math.min(Math.max(lowest, neededRows, looseNames.length), lowest + 400);
+        let maxRows = lowest;
+        if (avail && avail.width > 0 && avail.height > 0) {
+            const targetAspect = avail.width / avail.height;
+            let best = null;
+            for (let rows = lowest; rows <= highest; rows++) {
+                const e = estimate(rows);
+                const scale = Math.min(1, avail.width / e.width, avail.height / e.height);
+                const aspectError = Math.abs(Math.log((e.width / e.height) / targetAspect));
+                if (!best || scale > best.scale + 1e-6
+                    || (Math.abs(scale - best.scale) <= 1e-6 && aspectError < best.aspectError)) {
+                    best = {rows, scale, aspectError};
+                }
+            }
+            maxRows = best.rows;
+        } else {
+            maxRows = layerCount > 1 ? Math.max(otherMax, 8) : Math.max(8, Math.ceil(columns[0].length / 4));
+        }
+        // Keep to the planned number of sub-columns so the diagram keeps the
+        // chosen shape; a group may only open another if it fits nowhere else
+        const subColumnLimit = Math.max(1, estimate(maxRows).linkedSubColumns);
+
+        // Groups taller than a sub-column are split into pieces, one box each
+        const linkedGroups = [];
+        rawGroups.forEach(group => {
+            for (let i = 0; i < group.names.length; i += maxRows) {
+                linkedGroups.push({names: group.names.slice(i, i + maxRows), children: group.children});
+            }
+        });
 
         /**
-         * Draw the graph. Returns the viewport element, which carries a small API
-         * in viewport.clustergraph for live updates (see onRenderedContainer).
-         * view, if given, is a zoom transform to start from instead of fitting.
+         * Compute the full drawing for a given row order of the left levels
+         * (order[i] lists the hosts of level i, for i >= 1): host positions,
+         * boxes and edges. Levels keep their columns; only rows change.
+         * spread is the cost of putting a rightmost group one sub-column
+         * further out, against moving it one row from its children's height.
+         * pinned optionally fixes some rightmost groups at {k, start}.
+         * sp is the spacing ({rowHeight, columnGap, subColumnGap}).
          */
-        chart: function (data, view) {
-            const navigation = document.getElementById("navigation");
-            const textColor = (navigation && rgbToHex(getComputedStyle(navigation).getPropertyValue('color').trim())) || "#535353";
+        const place = (order, spread = 1.5, pinned = null, sp = BASE) => {
+            const rowY = row => PADDING + row * sp.rowHeight;
+            const coords = new Map();
+            let x = PADDING;
 
-            const nodes = data.nodes || [];
-            const links = data.links || [];
-
-            if (!nodes.length) {
-                const empty = document.createElement('p');
-                empty.textContent = 'No hosts found in the "synthetic" host group.';
-                return empty;
+            // Left levels: deepest first, each centred against maxRows
+            for (let col = layerCount - 1; col >= 1; col--) {
+                x += widest(order[col]) + LABEL_OFFSET;
+                const offset = (maxRows - order[col].length) / 2;
+                order[col].forEach((name, i) => coords.set(name, {x, y: rowY(offset + i)}));
+                x += sp.columnGap;
             }
 
-            const {columns, layerCount} = layout(nodes, links);
-
-            const fontSize = 12;
-            const rowHeight = 24;
-            const padding = 16;
-            const labelOffset = 10; // circle centre to the end of its label (labels sit left of the dot)
-            const columnGap = 90;   // space for the edges between dependency levels
-            const subColumnGap = 40; // space between the wrapped parts of the rightmost column
-            const boxPadX = 6;
-
-            const nodeNames = new Set(nodes.map(n => n.name));
-            const validLinks = links.filter(l => nodeNames.has(l.source) && nodeNames.has(l.target));
-            const childrenOf = new Map(nodes.map(n => [n.name, []]));
-            validLinks.forEach(l => childrenOf.get(l.source).push(l.target));
-            const rightmost = new Set(columns[0]);
-
-            // Measure labels so each column leaves room for its text
-            const ctx = document.createElement("canvas").getContext("2d");
-            const labelWidth = new Map(nodes.map(n => {
-                ctx.font = (n.synthetic ? "bold" : "italic") + " " + fontSize + "px sans-serif";
-                return [n.name, ctx.measureText(n.label).width];
-            }));
-
-            // The rightmost level (hosts with no parents) is usually by far the
-            // tallest, so it is wrapped into side-by-side sub-columns no taller
-            // than the rest of the graph. Hosts that are parents of the same
-            // children form a group, drawn as one box with one exit point.
-            const otherMax = Math.max(0, ...columns.slice(1).map(c => c.length));
-            const maxRows = layerCount > 1
-                ? Math.max(otherMax, 8)
-                : Math.max(8, Math.ceil(columns[0].length / 4));
-
-            const groupsByKey = new Map();
-            columns[0].forEach(name => {
-                const key = childrenOf.get(name).slice().sort().join("\0");
-                if (!groupsByKey.has(key)) groupsByKey.set(key, []);
-                groupsByKey.get(key).push(name);
+            // Rightmost level: put each group at the height of its children,
+            // in whichever sub-column lets it sit closest to that height
+            linkedGroups.forEach(group => {
+                const meanY = d3.mean(group.children, child => coords.get(child).y);
+                group.desired = (meanY - PADDING) / sp.rowHeight - (group.names.length - 1) / 2;
             });
-            // Groups taller than a sub-column are split into pieces, one box each
-            const linkedGroups = [];
-            let looseNames = [];
-            groupsByKey.forEach((names, key) => {
-                names.sort((a, b) => d3.ascending(a, b));
-                if (key === "") {
-                    looseNames = names;
-                    return;
+            // A sub-column tracks which rows are taken; a group needs its own
+            // rows plus a free row above and below to keep boxes apart.
+            const subColumns = [];
+            const newSub = () => ({taken: new Array(maxRows).fill(false), groups: []});
+            const fits = (column, start, size) => {
+                if (start < 0 || start + size > maxRows) return false;
+                for (let r = Math.max(0, start - 1); r <= Math.min(maxRows - 1, start + size); r++) {
+                    if (column.taken[r]) return false;
                 }
-                for (let i = 0; i < names.length; i += maxRows) {
-                    linkedGroups.push({names: names.slice(i, i + maxRows), children: key.split("\0")});
+                return true;
+            };
+            const put = (k, group, start) => {
+                while (subColumns.length <= k) subColumns.push(newSub());
+                const column = subColumns[k];
+                for (let r = start; r < start + group.names.length; r++) column.taken[r] = true;
+                column.groups.push({group, start});
+            };
+
+            // Groups with a position chosen by the final refinement go first
+            const pending = [];
+            linkedGroups.forEach(group => {
+                const fixed = pinned && pinned.get(group);
+                if (fixed && fits(subColumns[fixed.k] || newSub(), fixed.start, group.names.length)) {
+                    put(fixed.k, group, fixed.start);
+                } else {
+                    pending.push(group);
                 }
             });
-
-            const widest = names => Math.max(0, ...names.map(name => labelWidth.get(name)));
-            const rowY = row => padding + row * rowHeight;
-
-            /**
-             * Compute the full drawing for a given row order of the left levels
-             * (order[i] lists the hosts of level i, for i >= 1): host positions,
-             * boxes and edges. Levels keep their columns; only rows change.
-             * spread is the cost of putting a rightmost group one sub-column
-             * further out, against moving it one row from its children's height.
-             * pinned optionally fixes some rightmost groups at {k, start}.
-             */
-            const place = (order, spread = 1.5, pinned = null) => {
-                const coords = new Map();
-                let x = padding;
-
-                // Left levels: deepest first, each centred against maxRows
-                for (let col = layerCount - 1; col >= 1; col--) {
-                    x += widest(order[col]) + labelOffset;
-                    const offset = (maxRows - order[col].length) / 2;
-                    order[col].forEach((name, i) => coords.set(name, {x, y: rowY(offset + i)}));
-                    x += columnGap;
-                }
-
-                // Rightmost level: put each group at the height of its children,
-                // in whichever sub-column lets it sit closest to that height.
-                // Groups are placed in order of that height, so each sub-column
-                // fills top to bottom with a blank row between groups.
-                linkedGroups.forEach(group => {
-                    const meanY = d3.mean(group.children, child => coords.get(child).y);
-                    group.desired = (meanY - padding) / rowHeight - (group.names.length - 1) / 2;
-                });
-                // A sub-column tracks which rows are taken; a group needs its own
-                // rows plus a free row above and below to keep boxes apart.
-                const subColumns = [];
-                const newSub = () => ({taken: new Array(maxRows).fill(false), groups: []});
-                const fits = (column, start, size) => {
-                    if (start < 0 || start + size > maxRows) return false;
-                    for (let r = Math.max(0, start - 1); r <= Math.min(maxRows - 1, start + size); r++) {
-                        if (column.taken[r]) return false;
-                    }
-                    return true;
-                };
-                const put = (k, group, start) => {
-                    while (subColumns.length <= k) subColumns.push(newSub());
-                    const column = subColumns[k];
-                    for (let r = start; r < start + group.names.length; r++) column.taken[r] = true;
-                    column.groups.push({group, start});
-                };
-
-                // Groups with a position chosen by the final refinement go first
-                const pending = [];
-                linkedGroups.forEach(group => {
-                    const fixed = pinned && pinned.get(group);
-                    if (fixed && fits(subColumns[fixed.k] || newSub(), fixed.start, group.names.length)) {
-                        put(fixed.k, group, fixed.start);
-                    } else {
-                        pending.push(group);
-                    }
-                });
-                pending
-                    .sort((a, b) => a.desired - b.desired)
-                    .forEach(group => {
-                        const size = group.names.length;
+            pending
+                .sort((a, b) => a.desired - b.desired)
+                .forEach(group => {
+                    const size = group.names.length;
+                    const search = limit => {
                         let best = null;
-                        for (let k = 0; k <= subColumns.length; k++) {
+                        for (let k = 0; k <= Math.min(subColumns.length, limit - 1); k++) {
                             const column = subColumns[k] || newSub();
                             for (let start = 0; start + size <= maxRows; start++) {
                                 if (!fits(column, start, size)) continue;
@@ -265,233 +311,412 @@
                                 if (!best || cost < best.cost) best = {k, start, cost};
                             }
                         }
-                        put(best.k, group, best.start);
-                    });
-                // Drop sub-columns left empty by pinned positions
-                for (let k = subColumns.length - 1; k >= 0; k--) {
-                    if (!subColumns[k].groups.length) subColumns.splice(k, 1);
-                }
-                linkedGroups.forEach(group => group.placed = null);
-                subColumns.forEach((column, k) => column.groups.forEach(g => g.group.placed = {k, start: g.start}));
-
-                // Hosts with no children go last, in sub-columns of their own
-                for (let i = 0; i < looseNames.length; i += maxRows) {
-                    const names = looseNames.slice(i, i + maxRows);
-                    subColumns.push({
-                        groups: [{
-                            group: {names, children: []},
-                            start: Math.floor((maxRows - names.length) / 2)
-                        }]
-                    });
-                }
-
-                const boxes = [];
-                subColumns.forEach((column, k) => {
-                    if (k > 0) x += subColumnGap;
-                    x += widest([].concat(...column.groups.map(g => g.group.names))) + labelOffset;
-                    column.groups.forEach(({group, start}) => {
-                        group.names.forEach((name, i) => coords.set(name, {x, y: rowY(start + i)}));
-                        boxes.push({
-                            names: group.names,
-                            children: group.children,
-                            x0: x - labelOffset - widest(group.names) - boxPadX,
-                            x1: x + 5 + boxPadX,
-                            y0: rowY(start) - rowHeight / 2 + 2,
-                            y1: rowY(start + group.names.length - 1) + rowHeight / 2 - 2
-                        });
-                    });
+                        return best;
+                    };
+                    const best = search(subColumnLimit) || search(Infinity);
+                    put(best.k, group, best.start);
                 });
+            // Drop sub-columns left empty by pinned positions
+            for (let k = subColumns.length - 1; k >= 0; k--) {
+                if (!subColumns[k].groups.length) subColumns.splice(k, 1);
+            }
+            linkedGroups.forEach(group => group.placed = null);
+            subColumns.forEach((column, k) => column.groups.forEach(g => g.group.placed = {k, start: g.start}));
 
-                // Edges leave from the far (left) end of the parent's label, or from
-                // the box of a rightmost group, and run left into the child's dot.
-                const edges = validLinks
-                    .filter(l => !rightmost.has(l.source))
-                    .map(l => {
-                        const p = coords.get(l.source);
-                        return {
-                            source: {x: p.x - labelOffset - labelWidth.get(l.source) - 5, y: p.y},
-                            target: coords.get(l.target),
-                            child: l.target
-                        };
-                    });
-                boxes.forEach(box => {
-                    const start = {x: box.x0, y: (box.y0 + box.y1) / 2};
-                    box.children.forEach(child => edges.push({source: start, target: coords.get(child), child}));
+            // Hosts with no children go last, in sub-columns of their own
+            for (let i = 0; i < looseNames.length; i += maxRows) {
+                const names = looseNames.slice(i, i + maxRows);
+                subColumns.push({
+                    groups: [{group: {names, children: []}, start: Math.floor((maxRows - names.length) / 2)}]
                 });
-
-                // Where each host's edges start, for ordering its children
-                const anchorY = new Map();
-                coords.forEach((p, name) => anchorY.set(name, p.y));
-                boxes.forEach(box => box.names.forEach(name => anchorY.set(name, (box.y0 + box.y1) / 2)));
-
-                return {coords, boxes, edges, anchorY, width: x + 5 + boxPadX + padding};
-            };
-
-            // Count crossing edges, treating each as a straight line (the drawn
-            // curves cross in the same places). Edges sharing an end can't cross.
-            const crossings = edges => {
-                let count = 0;
-                const same = (a, b) => Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5;
-                const yAt = (e, x) => e.source.y + (e.target.y - e.source.y) * (x - e.source.x) / (e.target.x - e.source.x);
-                for (let i = 0; i < edges.length; i++) {
-                    for (let j = i + 1; j < edges.length; j++) {
-                        const a = edges[i], b = edges[j];
-                        if (same(a.source, b.source) || same(a.target, b.target)) continue;
-                        const lo = Math.max(a.target.x, b.target.x);
-                        const hi = Math.min(a.source.x, b.source.x);
-                        if (hi - lo < 1) continue;
-                        if ((yAt(a, lo) - yAt(b, lo)) * (yAt(a, hi) - yAt(b, hi)) < 0) count++;
-                    }
-                }
-                return count;
-            };
-            // Count edges that run through a box or a host label they don't belong
-            // to; that hides text just as badly as a crossing does.
-            const obstacleHits = geo => {
-                const obstacles = geo.boxes.map(b => ({x0: b.x0, x1: b.x1, y0: b.y0, y1: b.y1}));
-                geo.coords.forEach((p, name) => {
-                    if (rightmost.has(name)) return; // already inside a box
-                    obstacles.push({
-                        x0: p.x - labelOffset - labelWidth.get(name), x1: p.x + 5,
-                        y0: p.y - rowHeight / 2 + 5, y1: p.y + rowHeight / 2 - 5
-                    });
-                });
-                let count = 0;
-                geo.edges.forEach(e => {
-                    obstacles.forEach(o => {
-                        const lo = Math.max(o.x0, e.target.x + 6), hi = Math.min(o.x1, e.source.x - 1);
-                        if (hi <= lo) return;
-                        const yA = e.source.y + (e.target.y - e.source.y) * (lo - e.source.x) / (e.target.x - e.source.x);
-                        const yB = e.source.y + (e.target.y - e.source.y) * (hi - e.source.x) / (e.target.x - e.source.x);
-                        if (Math.max(yA, yB) > o.y0 && Math.min(yA, yB) < o.y1) count++;
-                    });
-                });
-                return count;
-            };
-            // Fewest crossings and hidden labels first; among equals, prefer
-            // shorter vertical runs
-            const score = geo => (crossings(geo.edges) + obstacleHits(geo)) * 1e6
-                + d3.sum(geo.edges, e => Math.abs(e.source.y - e.target.y));
-
-            // Reorder the rows of the left levels to minimise crossings. Hosts never
-            // change level, so the left-to-right placement stays as it is.
-            const order = columns.map(c => c.slice());
-            let bestOrder = order.map(c => c.slice());
-            let bestGeo = place(order);
-            let bestScore = score(bestGeo);
-            const consider = () => {
-                const geo = place(order);
-                const s = score(geo);
-                if (s < bestScore) {
-                    bestScore = s;
-                    bestGeo = geo;
-                    bestOrder = order.map(c => c.slice());
-                    return true;
-                }
-                return false;
-            };
-
-            if (layerCount > 1) {
-                const parentsOf = new Map(nodes.map(n => [n.name, []]));
-                validLinks.forEach(l => parentsOf.get(l.target).push(l.source));
-                const sortBy = (col, neighbours) => {
-                    const geo = place(order);
-                    const key = new Map(order[col].map(name => {
-                        const list = neighbours.get(name);
-                        const own = geo.coords.get(name).y;
-                        return [name, list.length ? d3.mean(list, n => geo.anchorY.get(n)) : own];
-                    }));
-                    order[col].sort((a, b) => key.get(a) - key.get(b));
-                };
-
-                // Barycenter sweeps, alternating towards the parents and the children
-                for (let round = 0; round < 8; round++) {
-                    for (let col = 1; col < layerCount; col++) sortBy(col, parentsOf);
-                    consider();
-                    for (let col = layerCount - 1; col >= 1; col--) sortBy(col, childrenOf);
-                    consider();
-                }
-
-                // Then try swapping neighbours in each level while that still helps
-                // (skipped on very large graphs to keep rendering quick)
-                order.forEach((c, i) => order[i] = bestOrder[i].slice());
-                if (validLinks.length <= 400) {
-                    for (let pass = 0, improved = true; improved && pass < 6; pass++) {
-                        improved = false;
-                        for (let col = 1; col < layerCount; col++) {
-                            for (let i = 0; i + 1 < order[col].length; i++) {
-                                [order[col][i], order[col][i + 1]] = [order[col][i + 1], order[col][i]];
-                                if (consider()) {
-                                    improved = true;
-                                } else {
-                                    [order[col][i], order[col][i + 1]] = [order[col][i + 1], order[col][i]];
-                                }
-                            }
-                        }
-                    }
-                }
             }
 
-            // Try a few trade-offs for spreading the rightmost groups out
-            let bestSpread = 1.5;
-            [0.25, 0.75, 3, 6, 12].forEach(spread => {
-                const geo = place(bestOrder, spread);
-                const s = score(geo);
-                if (s < bestScore) {
-                    bestScore = s;
-                    bestGeo = geo;
-                    bestSpread = spread;
-                }
+            const boxes = [];
+            subColumns.forEach((column, k) => {
+                if (k > 0) x += sp.subColumnGap;
+                x += widest([].concat(...column.groups.map(g => g.group.names))) + LABEL_OFFSET;
+                column.groups.forEach(({group, start}) => {
+                    group.names.forEach((name, i) => coords.set(name, {x, y: rowY(start + i)}));
+                    boxes.push({
+                        names: group.names,
+                        children: group.children,
+                        x0: x - LABEL_OFFSET - widest(group.names) - BOX_PAD_X,
+                        x1: x + 5 + BOX_PAD_X,
+                        y0: rowY(start) - BASE.rowHeight / 2 + 2,
+                        y1: rowY(start + group.names.length - 1) + BASE.rowHeight / 2 - 2
+                    });
+                });
             });
 
-            // Finally, try moving each rightmost group to any free spot within a
-            // few rows of where it is, in any sub-column, keeping each move that
-            // lowers the score (skipped on very large graphs)
-            if (linkedGroups.length > 1 && validLinks.length <= 400) {
-                // Start from where the current best layout put every group
-                place(bestOrder, bestSpread);
-                const pinned = new Map(linkedGroups.map(group => [group, group.placed]));
-                for (let pass = 0, improved = true; improved && pass < 3; pass++) {
-                    improved = false;
-                    linkedGroups.forEach(group => {
-                        const current = pinned.get(group);
-                        const subCount = Math.max(...[...pinned.values()].map(p => p.k)) + 1;
-                        let bestMove = null;
-                        for (let k = 0; k <= subCount; k++) {
-                            for (let start = current.start - 3; start <= current.start + 3; start++) {
-                                if (k === current.k && start === current.start) continue;
-                                if (start < 0 || start + group.names.length > maxRows) continue;
-                                const trial = new Map(pinned).set(group, {k, start});
-                                const geo = place(bestOrder, bestSpread, trial);
-                                const s = score(geo);
-                                if (s < bestScore && (!bestMove || s < bestMove.s)) bestMove = {trial, geo, s};
-                            }
-                        }
-                        if (bestMove) {
-                            bestScore = bestMove.s;
-                            bestGeo = bestMove.geo;
-                            improved = true;
-                            // A move can push other groups around; record where all of them ended up
-                            place(bestOrder, bestSpread, bestMove.trial);
-                            linkedGroups.forEach(g => pinned.set(g, g.placed));
-                        }
-                    });
+            // Edges leave from the far (left) end of the parent's label, or from
+            // the box of a rightmost group, and run left into the child's dot.
+            const edges = validLinks
+                .filter(l => !rightmost.has(l.source))
+                .map(l => {
+                    const p = coords.get(l.source);
+                    return {
+                        source: {x: p.x - LABEL_OFFSET - labelWidth.get(l.source) - 5, y: p.y},
+                        target: coords.get(l.target),
+                        child: l.target
+                    };
+                });
+            boxes.forEach(box => {
+                const start = {x: box.x0, y: (box.y0 + box.y1) / 2};
+                box.children.forEach(child => edges.push({source: start, target: coords.get(child), child}));
+            });
+
+            // Where each host's edges start, for ordering its children
+            const anchorY = new Map();
+            coords.forEach((p, name) => anchorY.set(name, p.y));
+            boxes.forEach(box => box.names.forEach(name => anchorY.set(name, (box.y0 + box.y1) / 2)));
+
+            return {
+                coords, boxes, edges, anchorY,
+                subColumnCount: subColumns.length,
+                width: x + 5 + BOX_PAD_X + PADDING
+            };
+        };
+
+        // Count crossing edges, treating each as a straight line (the drawn
+        // curves cross in the same places). Edges sharing an end can't cross.
+        const crossings = edges => {
+            let count = 0;
+            const same = (a, b) => Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5;
+            const yAt = (e, x) => e.source.y + (e.target.y - e.source.y) * (x - e.source.x) / (e.target.x - e.source.x);
+            for (let i = 0; i < edges.length; i++) {
+                for (let j = i + 1; j < edges.length; j++) {
+                    const a = edges[i], b = edges[j];
+                    if (same(a.source, b.source) || same(a.target, b.target)) continue;
+                    const lo = Math.max(a.target.x, b.target.x);
+                    const hi = Math.min(a.source.x, b.source.x);
+                    if (hi - lo < 1) continue;
+                    if ((yAt(a, lo) - yAt(b, lo)) * (yAt(a, hi) - yAt(b, hi)) < 0) count++;
                 }
             }
+            return count;
+        };
+        // Count edges that run through a box or a host label they don't belong
+        // to; that hides text just as badly as a crossing does.
+        const obstacleHits = geo => {
+            const obstacles = geo.boxes.map(b => ({x0: b.x0, x1: b.x1, y0: b.y0, y1: b.y1}));
+            geo.coords.forEach((p, name) => {
+                if (rightmost.has(name)) return; // already inside a box
+                obstacles.push({
+                    x0: p.x - LABEL_OFFSET - labelWidth.get(name), x1: p.x + 5,
+                    y0: p.y - BASE.rowHeight / 2 + 5, y1: p.y + BASE.rowHeight / 2 - 5
+                });
+            });
+            let count = 0;
+            geo.edges.forEach(e => {
+                obstacles.forEach(o => {
+                    const lo = Math.max(o.x0, e.target.x + 6), hi = Math.min(o.x1, e.source.x - 1);
+                    if (hi <= lo) return;
+                    const yA = e.source.y + (e.target.y - e.source.y) * (lo - e.source.x) / (e.target.x - e.source.x);
+                    const yB = e.source.y + (e.target.y - e.source.y) * (hi - e.source.x) / (e.target.x - e.source.x);
+                    if (Math.max(yA, yB) > o.y0 && Math.min(yA, yB) < o.y1) count++;
+                });
+            });
+            return count;
+        };
+        // Fewest crossings and hidden labels first; among equals, prefer
+        // shorter vertical runs
+        const score = geo => (crossings(geo.edges) + obstacleHits(geo)) * 1e6
+            + d3.sum(geo.edges, e => Math.abs(e.source.y - e.target.y));
 
-            const {coords, boxes, width} = bestGeo;
-            const drawnLinks = bestGeo.edges;
-            const point = name => coords.get(name);
-            // Crop to the rows actually used (placement works on a maxRows grid)
-            const ys = [...coords.values()].map(p => p.y)
-                .concat(...boxes.map(b => [b.y0 + rowHeight / 2 - 2, b.y1 - rowHeight / 2 + 2]));
-            const top = Math.min(...ys) - padding;
-            const height = Math.max(...ys) - Math.min(...ys) + padding * 2 + 8;
+        // Reorder the rows of the left levels to minimise crossings. Hosts never
+        // change level, so the left-to-right placement stays as it is.
+        const order = columns.map(c => c.slice());
+        let bestOrder = order.map(c => c.slice());
+        let bestGeo = place(order);
+        let bestScore = score(bestGeo);
+        let bestSpread = 1.5;
+        let bestPinned = null;
+        const consider = () => {
+            const geo = place(order);
+            const s = score(geo);
+            if (s < bestScore) {
+                bestScore = s;
+                bestGeo = geo;
+                bestOrder = order.map(c => c.slice());
+                return true;
+            }
+            return false;
+        };
 
-            // Edges from the outer sub-columns pass behind inner labels, so outline
-            // the text in the page background colour to keep it readable.
+        if (layerCount > 1) {
+            const parentsOf = new Map(nodes.map(n => [n.name, []]));
+            validLinks.forEach(l => parentsOf.get(l.target).push(l.source));
+            const sortBy = (col, neighbours) => {
+                const geo = place(order);
+                const key = new Map(order[col].map(name => {
+                    const list = neighbours.get(name);
+                    const own = geo.coords.get(name).y;
+                    return [name, list.length ? d3.mean(list, n => geo.anchorY.get(n)) : own];
+                }));
+                order[col].sort((a, b) => key.get(a) - key.get(b));
+            };
+
+            // Barycenter sweeps, alternating towards the parents and the children
+            for (let round = 0; round < 8; round++) {
+                for (let col = 1; col < layerCount; col++) sortBy(col, parentsOf);
+                consider();
+                for (let col = layerCount - 1; col >= 1; col--) sortBy(col, childrenOf);
+                consider();
+            }
+
+            // Then try swapping neighbours in each level while that still helps
+            // (skipped on very large graphs to keep rendering quick)
+            order.forEach((c, i) => order[i] = bestOrder[i].slice());
+            if (validLinks.length <= 400) {
+                for (let pass = 0, improved = true; improved && pass < 6; pass++) {
+                    improved = false;
+                    for (let col = 1; col < layerCount; col++) {
+                        for (let i = 0; i + 1 < order[col].length; i++) {
+                            [order[col][i], order[col][i + 1]] = [order[col][i + 1], order[col][i]];
+                            if (consider()) {
+                                improved = true;
+                            } else {
+                                [order[col][i], order[col][i + 1]] = [order[col][i + 1], order[col][i]];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Try a few trade-offs for spreading the rightmost groups out
+        [0.25, 0.75, 3, 6, 12].forEach(spread => {
+            const geo = place(bestOrder, spread);
+            const s = score(geo);
+            if (s < bestScore) {
+                bestScore = s;
+                bestGeo = geo;
+                bestSpread = spread;
+            }
+        });
+
+        // Then try moving each rightmost group to any free spot within a few
+        // rows of where it is, in any sub-column, keeping each move that lowers
+        // the score (skipped on very large graphs)
+        if (linkedGroups.length > 1 && validLinks.length <= 400) {
+            place(bestOrder, bestSpread);
+            const pinned = new Map(linkedGroups.map(group => [group, group.placed]));
+            for (let pass = 0, improved = true; improved && pass < 3; pass++) {
+                improved = false;
+                linkedGroups.forEach(group => {
+                    const current = pinned.get(group);
+                    const subCount = Math.max(...[...pinned.values()].map(p => p.k)) + 1;
+                    let bestMove = null;
+                    for (let k = 0; k < Math.max(subCount, subColumnLimit); k++) {
+                        for (let start = current.start - 3; start <= current.start + 3; start++) {
+                            if (k === current.k && start === current.start) continue;
+                            if (start < 0 || start + group.names.length > maxRows) continue;
+                            const trial = new Map(pinned).set(group, {k, start});
+                            const geo = place(bestOrder, bestSpread, trial);
+                            const s = score(geo);
+                            if (s < bestScore && (!bestMove || s < bestMove.s)) bestMove = {trial, geo, s};
+                        }
+                    }
+                    if (bestMove) {
+                        bestScore = bestMove.s;
+                        bestGeo = bestMove.geo;
+                        bestPinned = bestMove.trial;
+                        improved = true;
+                        // A move can push other groups around; record where all of them ended up
+                        place(bestOrder, bestSpread, bestMove.trial);
+                        linkedGroups.forEach(g => pinned.set(g, g.placed));
+                    }
+                });
+            }
+        }
+
+        // Size of a layout, cropped to the rows actually used
+        const extent = geo => {
+            const ys = [...geo.coords.values()].map(p => p.y);
+            const minY = Math.min(...ys), maxY = Math.max(...ys);
+            return {top: minY - PADDING, height: maxY - minY + 2 * PADDING + 8, rows: maxY - minY};
+        };
+
+        // Spread out: widen the gaps between columns and between rows so the
+        // diagram fills the viewport at 100% (within limits that keep it tidy)
+        let geo = bestGeo;
+        if (avail && avail.width > 0 && avail.height > 0) {
+            const sp = Object.assign({}, BASE);
+            const gaps = (layerCount - 1) * BASE.columnGap + Math.max(0, geo.subColumnCount - 1) * BASE.subColumnGap;
+            const extraWidth = avail.width - geo.width;
+            if (extraWidth > 0 && gaps > 0) {
+                const factor = Math.min(4, 1 + extraWidth / gaps);
+                sp.columnGap = BASE.columnGap * factor;
+                sp.subColumnGap = BASE.subColumnGap * factor;
+            }
+            const size = extent(geo);
+            const rowSteps = size.rows / BASE.rowHeight;
+            const extraHeight = avail.height - size.height;
+            if (extraHeight > 0 && rowSteps >= 1) {
+                sp.rowHeight = Math.min(2 * BASE.rowHeight, BASE.rowHeight + extraHeight / rowSteps);
+            }
+            geo = place(bestOrder, bestSpread, bestPinned, sp);
+        }
+
+        const size = extent(geo);
+        return {coords: geo.coords, boxes: geo.boxes, edges: geo.edges, width: geo.width, height: size.height, top: size.top};
+    }
+
+    /**
+     * Hosts at the bottom of the hierarchy (no children, at least one parent),
+     * for the subset picker: those in the leftmost column first, then the rest.
+     */
+    function bottomHosts(data) {
+        const nodes = data.nodes || [];
+        const names = new Set(nodes.map(n => n.name));
+        const links = (data.links || []).filter(l => names.has(l.source) && names.has(l.target));
+        const hasChildren = new Set(links.map(l => l.source));
+        const hasParents = new Set(links.map(l => l.target));
+        const bottom = nodes.filter(n => hasParents.has(n.name) && !hasChildren.has(n.name));
+        if (!bottom.length) return {leftmost: [], other: []};
+        const {columns} = layout(nodes, links);
+        const leftmost = new Set(columns[columns.length - 1]);
+        const byLabel = (a, b) => d3.ascending(a.label, b.label);
+        return {
+            leftmost: bottom.filter(n => leftmost.has(n.name)).sort(byLabel),
+            other: bottom.filter(n => !leftmost.has(n.name)).sort(byLabel)
+        };
+    }
+
+    /**
+     * The part of the graph above one host: the host, its parents, their
+     * parents and so on, with the dependencies between them.
+     */
+    function subsetAbove(data, name) {
+        const parentsOf = new Map();
+        (data.links || []).forEach(l => {
+            if (!parentsOf.has(l.target)) parentsOf.set(l.target, []);
+            parentsOf.get(l.target).push(l.source);
+        });
+        const keep = new Set([name]);
+        const queue = [name];
+        while (queue.length) {
+            (parentsOf.get(queue.shift()) || []).forEach(parent => {
+                if (!keep.has(parent)) {
+                    keep.add(parent);
+                    queue.push(parent);
+                }
+            });
+        }
+        return {
+            nodes: (data.nodes || []).filter(n => keep.has(n.name)),
+            links: (data.links || []).filter(l => keep.has(l.source) && keep.has(l.target))
+        };
+    }
+
+    const FOCUS_KEY = "clustergraph-focus";
+    const readFocus = () => {
+        try {
+            return window.localStorage.getItem(FOCUS_KEY) || null;
+        } catch (e) {
+            return null;
+        }
+    };
+    const saveFocus = value => {
+        try {
+            if (value) {
+                window.localStorage.setItem(FOCUS_KEY, value);
+            } else {
+                window.localStorage.removeItem(FOCUS_KEY);
+            }
+        } catch (e) {
+            // Storage unavailable (private mode etc.): the choice just isn't remembered
+        }
+    };
+
+    Clustergraph.prototype = {
+
+        initialize: function () {
+            this.module.on('rendered', this.onRenderedContainer);
+        },
+
+        onRenderedContainer: function (event) {
+            const container = document.getElementById('clustergraph-container');
+            // in module configuration we don't have a graph, so return peacefully
+            if (!container) {
+                return;
+            }
+
+            const url = window.location.pathname + "/index/data";
+            const load = () => fetch(url, {cache: "no-store", headers: {Accept: "application/json"}})
+                .then(response => {
+                    if (!response.ok) throw new Error("HTTP " + response.status);
+                    return response.json();
+                });
+            const time = () => new Date().toLocaleTimeString();
+
+            // Only one refresh loop at a time, even if Icinga renders us again
+            if (this.stopRefresh) this.stopRefresh();
+
+            load().then(data => {
+                const graph = this.mount(container);
+                graph.setData(data);
+                graph.setStatus("Updated " + time());
+
+                let busy = false;
+                let timer = null;
+                const stop = () => {
+                    clearInterval(timer);
+                    document.removeEventListener("visibilitychange", onVisible);
+                    if (this.stopRefresh === stop) this.stopRefresh = null;
+                };
+                const refresh = () => {
+                    if (!graph.isConnected()) {
+                        stop(); // navigated away
+                        return;
+                    }
+                    if (document.hidden || busy) return;
+                    busy = true;
+                    load().then(fresh => {
+                        if (!graph.isConnected()) return;
+                        graph.setData(fresh);
+                        graph.setStatus("Updated " + time());
+                    }).catch(() => {
+                        if (graph.isConnected()) graph.setStatus("Update failed, retrying");
+                    }).finally(() => { busy = false; });
+                };
+                // Catch up straight away when the tab becomes visible again
+                const onVisible = () => { if (!document.hidden) refresh(); };
+                document.addEventListener("visibilitychange", onVisible);
+                timer = setInterval(refresh, REFRESH_MS);
+                this.stopRefresh = stop;
+            }).catch(error => {
+                const message = document.createElement("p");
+                message.textContent = "Could not load the graph (" + error.message + "). Reload the page to try again.";
+                container.replaceChildren(message);
+            });
+        },
+
+        /**
+         * Build the zoomable viewport in container and return an API to feed it
+         * data: {setData(data), setStatus(text), isConnected()}.
+         *
+         * The viewport fills the browser window below its top edge, reaching
+         * into the surrounding padding so there is no border around it. The
+         * graph is laid out to match the viewport's shape and re-laid out when
+         * the viewport changes size (unless the user has zoomed or panned),
+         * when entering or leaving full screen, and when the shown subset or
+         * the hosts and dependencies change. State-only changes recolour the
+         * drawing in place.
+         *
+         * Controls: a picker to show only one bottom-level host and everything
+         * above it, zoom in/out, fit, 100% and full screen. Drag to move, pinch
+         * or Ctrl/Cmd + scroll to zoom; plain scrolling moves the diagram while
+         * it has somewhere to go and otherwise scrolls the page.
+         */
+        mount: function (container) {
+            const navigation = document.getElementById("navigation");
+            const textColor = (navigation && rgbToHex(getComputedStyle(navigation).getPropertyValue('color').trim())) || "#535353";
+
+            // Labels get an outline in the page background colour so arrows
+            // passing behind them don't hide the text
             let background = null;
-            for (let el = document.getElementById("clustergraph-container"); el; el = el.parentElement) {
+            for (let el = container; el; el = el.parentElement) {
                 const bg = getComputedStyle(el).backgroundColor;
                 if (bg && bg !== "transparent" && !/rgba\(.*,\s*0\)$/.test(bg)) {
                     background = bg;
@@ -499,10 +724,9 @@
                 }
             }
 
-            // The diagram sits in a viewport that can be zoomed and panned, and
-            // that fills the browser window from where it starts down to the
-            // bottom (see addZoom). Its background matches the page so it also
-            // looks right in full screen.
+            const edgeBlue = "#00c3ed";
+            const downRed = "#ff5566";
+
             const viewport = document.createElement("div");
             viewport.className = "clustergraph-viewport";
             if (background) viewport.style.backgroundColor = background;
@@ -510,19 +734,8 @@
             const svg = d3.select(viewport).append("svg")
                 .attr("width", "100%")
                 .attr("height", "100%")
-                .attr("style", "display: block; touch-action: none; font: " + fontSize + "px sans-serif;");
-
-            // Arrows pointing at a child drawn in red (down) are red too
-            const edgeBlue = "#00c3ed";
-            const downRed = "#ff5566";
-            const nodeByName = new Map(nodes.map(n => [n.name, n]));
-            const pointsAtRed = e => stateColor(nodeByName.get(e.child)) === downRed;
-
+                .attr("style", "display: block; touch-action: none; font: " + FONT_SIZE + "px sans-serif;");
             const defs = svg.append("defs");
-            // zoomLayer carries the zoom/pan transform; content shifts the drawing
-            // so its cropped top edge sits at y = 0.
-            const zoomLayer = svg.append("g");
-            const content = zoomLayer.append("g").attr("transform", `translate(0,${-top})`);
             [["clustergraph-arrow", edgeBlue], ["clustergraph-arrow-down", downRed]].forEach(([id, colour]) => {
                 defs.append("marker")
                     .attr("id", id)
@@ -536,120 +749,23 @@
                     .attr("d", "M0,-5L10,0L0,5")
                     .attr("fill", colour);
             });
+            // zoomLayer carries the zoom/pan transform; content shifts the drawing
+            // so its cropped top edge sits at y = 0
+            const zoomLayer = svg.append("g");
+            const content = zoomLayer.append("g");
 
-            // Boxes stay unfilled so an edge from an outer box can be followed
-            // across inner ones back to where it starts.
-            content.append("g")
-                .attr("fill", "none")
-                .attr("stroke", textColor)
-                .attr("stroke-opacity", 0.45)
-                .attr("stroke-width", 1.2)
-                .selectAll("rect")
-                .data(boxes)
-                .join("rect")
-                .attr("x", b => b.x0)
-                .attr("y", b => b.y0)
-                .attr("width", b => b.x1 - b.x0)
-                .attr("height", b => b.y1 - b.y0)
-                .attr("rx", 7)
-                .attr("ry", 7);
+            const emptyMessage = document.createElement("p");
+            emptyMessage.className = "clustergraph-empty";
+            emptyMessage.textContent = 'No hosts found in the "synthetic" host group.';
+            emptyMessage.hidden = true;
+            viewport.append(emptyMessage);
 
-            const edgePaths = content.append("g")
-                .attr("fill", "none")
-                .attr("stroke-width", 1.6)
-                .selectAll("path")
-                .data(drawnLinks)
-                .join("path")
-                .attr("d", d3.linkHorizontal()
-                    .x(p => p.x)
-                    .y(p => p.y));
-
-            const node = content.append("g")
-                .selectAll("a")
-                .data(nodes)
-                .join("a")
-                .attr("href", d => d.link)
-                .attr("transform", d => {
-                    const p = point(d.name);
-                    return `translate(${p.x},${p.y})`;
-                });
-
-            const titles = node.append("title");
-
-            const circles = node.append("circle")
-                .attr("r", 5)
-                .attr("stroke", d => d.synthetic ? "none" : textColor)
-                .attr("stroke-dasharray", "2,2");
-
-            const labels = node.append("text")
-                .attr("x", -labelOffset)
-                .attr("dy", "0.32em")
-                .attr("text-anchor", "end")
-                .attr("opacity", d => d.synthetic ? 1 : 0.6)
-                .attr("font-weight", d => d.synthetic ? "bold" : "normal")
-                .attr("font-style", d => d.synthetic ? "normal" : "italic")
-                .attr("stroke", background || "none")
-                .attr("stroke-width", 3)
-                .attr("stroke-linejoin", "round")
-                .attr("paint-order", "stroke")
-                .text(d => d.label);
-
-            // Everything that depends on host states, so a refresh can recolour
-            // the drawing in place without touching the layout or the zoom
-            const applyStates = () => {
-                titles.text(d => [
-                    d.name,
-                    "state: " + stateName(d),
-                    d.zone ? "zone: " + d.zone : null,
-                    d.synthetic ? null : "not in the synthetic host group"
-                ].filter(Boolean).join("\n"));
-                circles.attr("fill", d => stateColor(d));
-                labels.attr("fill", d => d.synthetic ? stateColor(d) : textColor);
-                edgePaths
-                    .attr("stroke", e => pointsAtRed(e) ? downRed : edgeBlue)
-                    .attr("stroke-opacity", e => pointsAtRed(e) ? 0.8 : 0.5)
-                    .attr("marker-end", e => pointsAtRed(e) ? "url(#clustergraph-arrow-down)" : "url(#clustergraph-arrow)")
-                    // Red arrows are drawn last so they stay on top where lines overlap
-                    .sort((a, b) => pointsAtRed(a) - pointsAtRed(b));
-            };
-            applyStates();
-
-            const zoomApi = this.addZoom(viewport, svg, zoomLayer, width, height, view);
-            viewport.clustergraph = Object.assign(zoomApi, {
-                structure: structureOf(data),
-                // Copy fresh states onto the drawn hosts and recolour
-                updateStates: fresh => {
-                    (fresh.nodes || []).forEach(n => {
-                        const drawn = nodeByName.get(n.name);
-                        if (!drawn) return;
-                        drawn.state = n.state;
-                        drawn.last_check = n.last_check;
-                        drawn.zone = n.zone;
-                    });
-                    applyStates();
-                }
-            });
-            return viewport;
-        },
-
-        /**
-         * Zoom and pan for the diagram:
-         * - drag to move, pinch or Ctrl/Cmd + scroll to zoom
-         * - plain scrolling moves the diagram while it has somewhere to go, and
-         *   otherwise scrolls the page as usual
-         * - buttons to zoom in, zoom out, fit the whole diagram, show 100% and
-         *   toggle full screen
-         * The viewport fills the window below its top edge and follows window
-         * resizes. It starts fitted, refits on resize until the user zooms or
-         * pans, and always refits when entering or leaving full screen.
-         */
-        addZoom: function (viewport, svg, zoomLayer, width, height, view) {
-            const margin = 40;
+            // Size of the current drawing, and whether the user has taken over the view
+            let width = 1, height = 1;
             let userMoved = false;
 
             const zoom = d3.zoom()
                 .scaleExtent([0.1, 4])
-                .translateExtent([[-margin, -margin], [width + margin, height + margin]])
                 // Wheel zooms only with Ctrl/Cmd (trackpad pinch sends ctrlKey too)
                 .filter(event => event.type === "wheel" ? (event.ctrlKey || event.metaKey) : !event.button)
                 // Gentle steps for a mouse wheel; trackpad pinches send small
@@ -681,17 +797,202 @@
                 }
             }, {passive: false});
 
-            const fitTransform = () => {
-                const vw = viewport.clientWidth, vh = viewport.clientHeight;
-                const k = Math.min(vw / width, vh / height, 1);
-                // Left-aligned like the page, centred vertically
-                return d3.zoomIdentity.translate(0, (vh - height * k) / 2).scale(k);
-            };
+            // Bands kept clear for the controls (top) and the hint (bottom), so
+            // the fitted diagram never sits underneath them
+            const reservedTop = 34, reservedBottom = 18;
+            const drawingArea = () => ({
+                width: viewport.clientWidth,
+                height: Math.max(0, viewport.clientHeight - reservedTop - reservedBottom)
+            });
+
             const fit = animate => {
-                if (!viewport.clientWidth || !viewport.clientHeight) return;
-                (animate ? svg.transition().duration(250) : svg).call(zoom.transform, fitTransform());
+                const area = drawingArea();
+                if (!area.width || !area.height) return;
+                const k = Math.min(area.width / width, area.height / height, 1);
+                const t = d3.zoomIdentity
+                    .translate((area.width - width * k) / 2, reservedTop + (area.height - height * k) / 2)
+                    .scale(k);
+                (animate ? svg.transition().duration(250) : svg).call(zoom.transform, t);
                 userMoved = false;
             };
+
+            // --- Data, subset and drawing ---------------------------------------
+
+            let fullData = {nodes: [], links: []};
+            let focus = readFocus();
+            let drawn = null; // {structure, update(data)} for what is on screen
+            let laidOutFor = {width: 0, height: 0};
+
+            const visibleData = () => focus ? subsetAbove(fullData, focus) : fullData;
+
+            const draw = view => {
+                const data = visibleData();
+                const nodes = (data.nodes || []).map(n => Object.assign({}, n));
+                const links = data.links || [];
+                content.selectAll("*").remove();
+                emptyMessage.hidden = nodes.length > 0;
+                laidOutFor = {width: viewport.clientWidth, height: viewport.clientHeight};
+                const area = drawingArea();
+                if (!nodes.length) {
+                    drawn = {structure: structureOf(data), update: () => {}};
+                    return;
+                }
+
+                const geo = computeLayout(nodes, links, area);
+                width = geo.width;
+                height = geo.height;
+                content.attr("transform", `translate(0,${-geo.top})`);
+                const margin = 40;
+                zoom.translateExtent([[-margin, -margin], [width + margin, height + margin]]);
+
+                const nodeByName = new Map(nodes.map(n => [n.name, n]));
+                const pointsAtRed = e => stateColor(nodeByName.get(e.child)) === downRed;
+
+                // Boxes stay unfilled so an edge from an outer box can be followed
+                // across inner ones back to where it starts
+                content.append("g")
+                    .attr("fill", "none")
+                    .attr("stroke", textColor)
+                    .attr("stroke-opacity", 0.45)
+                    .attr("stroke-width", 1.2)
+                    .selectAll("rect")
+                    .data(geo.boxes)
+                    .join("rect")
+                    .attr("x", b => b.x0)
+                    .attr("y", b => b.y0)
+                    .attr("width", b => b.x1 - b.x0)
+                    .attr("height", b => b.y1 - b.y0)
+                    .attr("rx", 7)
+                    .attr("ry", 7);
+
+                const edgePaths = content.append("g")
+                    .attr("fill", "none")
+                    .attr("stroke-width", 1.6)
+                    .selectAll("path")
+                    .data(geo.edges)
+                    .join("path")
+                    .attr("d", d3.linkHorizontal()
+                        .x(p => p.x)
+                        .y(p => p.y));
+
+                const node = content.append("g")
+                    .selectAll("a")
+                    .data(nodes)
+                    .join("a")
+                    .attr("href", d => d.link)
+                    .attr("transform", d => {
+                        const p = geo.coords.get(d.name);
+                        return `translate(${p.x},${p.y})`;
+                    });
+
+                const titles = node.append("title");
+
+                const circles = node.append("circle")
+                    .attr("r", 5)
+                    .attr("stroke", d => d.synthetic ? "none" : textColor)
+                    .attr("stroke-dasharray", "2,2");
+
+                const labels = node.append("text")
+                    .attr("x", -LABEL_OFFSET)
+                    .attr("dy", "0.32em")
+                    .attr("text-anchor", "end")
+                    .attr("opacity", d => d.synthetic ? 1 : 0.6)
+                    .attr("font-weight", d => d.synthetic ? "bold" : "normal")
+                    .attr("font-style", d => d.synthetic ? "normal" : "italic")
+                    .attr("stroke", background || "none")
+                    .attr("stroke-width", 3)
+                    .attr("stroke-linejoin", "round")
+                    .attr("paint-order", "stroke")
+                    .text(d => d.label);
+
+                // Everything that depends on host states, so a refresh can
+                // recolour the drawing in place without touching the layout
+                const applyStates = () => {
+                    titles.text(d => [
+                        d.name,
+                        "state: " + stateName(d),
+                        d.zone ? "zone: " + d.zone : null,
+                        d.synthetic ? null : "not in the synthetic host group"
+                    ].filter(Boolean).join("\n"));
+                    circles.attr("fill", d => stateColor(d));
+                    labels.attr("fill", d => d.synthetic ? stateColor(d) : textColor);
+                    edgePaths
+                        .attr("stroke", e => pointsAtRed(e) ? downRed : edgeBlue)
+                        .attr("stroke-opacity", e => pointsAtRed(e) ? 0.8 : 0.5)
+                        .attr("marker-end", e => pointsAtRed(e) ? "url(#clustergraph-arrow-down)" : "url(#clustergraph-arrow)")
+                        // Red arrows are drawn last so they stay on top where lines overlap
+                        .sort((a, b) => pointsAtRed(a) - pointsAtRed(b));
+                };
+                applyStates();
+
+                drawn = {
+                    structure: structureOf(data),
+                    update: fresh => {
+                        (fresh.nodes || []).forEach(n => {
+                            const shown = nodeByName.get(n.name);
+                            if (!shown) return;
+                            shown.state = n.state;
+                            shown.last_check = n.last_check;
+                            shown.zone = n.zone;
+                        });
+                        applyStates();
+                    }
+                };
+
+                if (view) {
+                    svg.call(zoom.transform, view);
+                    userMoved = true;
+                } else {
+                    fit(false);
+                }
+            };
+
+            // --- Controls --------------------------------------------------------
+
+            const controls = document.createElement("div");
+            controls.className = "clustergraph-controls";
+
+            // Subset picker: one bottom-level host and everything above it
+            const picker = document.createElement("select");
+            picker.title = "Show one host at the bottom of the hierarchy and everything above it";
+            picker.addEventListener("change", () => {
+                focus = picker.value || null;
+                saveFocus(focus);
+                draw(null);
+            });
+            let pickerFor = null;
+            const updatePicker = () => {
+                const structure = structureOf(fullData);
+                if (structure !== pickerFor) {
+                    pickerFor = structure;
+                    const {leftmost, other} = bottomHosts(fullData);
+                    const all = document.createElement("option");
+                    all.value = "";
+                    all.textContent = "All hosts";
+                    const groups = [[leftmost, "Leftmost column"], [other, "Other hosts without children"]]
+                        .filter(([list]) => list.length)
+                        .map(([list, label]) => {
+                            const group = document.createElement("optgroup");
+                            group.label = label;
+                            list.forEach(n => {
+                                const option = document.createElement("option");
+                                option.value = n.name;
+                                option.textContent = n.label;
+                                group.append(option);
+                            });
+                            return group;
+                        });
+                    picker.replaceChildren(all, ...groups);
+                    picker.hidden = !groups.length;
+                }
+                // Forget a chosen host that is no longer at the bottom of the graph
+                if (focus && !picker.querySelector(`option[value="${CSS.escape(focus)}"]`)) {
+                    focus = null;
+                    saveFocus(null);
+                }
+                picker.value = focus || "";
+            };
+            controls.append(picker);
 
             const isFullscreen = () =>
                 (document.fullscreenElement || document.webkitFullscreenElement) === viewport;
@@ -704,52 +1005,6 @@
                 }
             };
 
-            // Fill the window from the viewport's top edge down to the bottom.
-            // If the page would still scroll (padding and margins below us), take
-            // that much off so the whole working area is visible at once.
-            const scroller = () => {
-                for (let el = viewport.parentElement; el && el !== document.body; el = el.parentElement) {
-                    if (/(auto|scroll)/.test(getComputedStyle(el).overflowY)) return el;
-                }
-                return document.scrollingElement || document.documentElement;
-            };
-            const sizeToWindow = () => {
-                if (isFullscreen()) {
-                    viewport.style.height = "100vh";
-                    return;
-                }
-                const top = viewport.getBoundingClientRect().top;
-                viewport.style.height = Math.max(200, window.innerHeight - top) + "px";
-                const outer = scroller();
-                const excess = outer.scrollHeight - outer.clientHeight;
-                if (excess > 0) {
-                    viewport.style.height = Math.max(200, viewport.clientHeight - excess) + "px";
-                }
-            };
-            const onWindowResize = () => {
-                // Icinga replaces the diagram on refresh; drop listeners of old ones
-                if (!viewport.isConnected) {
-                    window.removeEventListener("resize", onWindowResize);
-                    return;
-                }
-                sizeToWindow();
-            };
-            window.addEventListener("resize", onWindowResize);
-            const onFullscreenChange = () => {
-                if (!viewport.isConnected) {
-                    document.removeEventListener("fullscreenchange", onFullscreenChange);
-                    document.removeEventListener("webkitfullscreenchange", onFullscreenChange);
-                    return;
-                }
-                sizeToWindow();
-                fullscreenButton && (fullscreenButton.textContent = isFullscreen() ? "Exit full screen" : "Full screen");
-                requestAnimationFrame(() => fit(false));
-            };
-            document.addEventListener("fullscreenchange", onFullscreenChange);
-            document.addEventListener("webkitfullscreenchange", onFullscreenChange);
-
-            const controls = document.createElement("div");
-            controls.className = "clustergraph-controls";
             let fullscreenButton = null;
             [
                 ["+", "Zoom in", () => svg.transition().duration(200).call(zoom.scaleBy, 1.4)],
@@ -767,7 +1022,7 @@
                 button.title = title;
                 button.addEventListener("click", event => {
                     event.preventDefault();
-                    userMoved = true;
+                    if (action !== toggleFullscreen) userMoved = true;
                     action();
                 });
                 controls.append(button);
@@ -781,96 +1036,104 @@
             hint.append(status, "Drag to move \u00b7 Ctrl/\u2318 + scroll or pinch to zoom");
             viewport.append(hint);
 
-            // Size to the window once the viewport is on the page, then fit (or
-            // restore the view carried over from the previous drawing); refit on
-            // resize until the user takes over
-            requestAnimationFrame(() => {
-                sizeToWindow();
-                if (view) {
-                    svg.call(zoom.transform, view);
-                    userMoved = true;
-                } else {
-                    fit(false);
+            // --- Sizing ----------------------------------------------------------
+
+            container.replaceChildren(viewport);
+
+            const scroller = () => {
+                for (let el = viewport.parentElement; el && el !== document.body; el = el.parentElement) {
+                    if (/(auto|scroll)/.test(getComputedStyle(el).overflowY)) return el;
                 }
-            });
+                return document.scrollingElement || document.documentElement;
+            };
+            // Fill the window from the viewport's top edge down to the bottom, and
+            // reach into the padding of the surrounding page so the graph runs
+            // edge to edge (upwards only if nothing sits above it)
+            const sizeToWindow = () => {
+                const style = viewport.style;
+                if (isFullscreen()) {
+                    style.margin = "0";
+                    style.width = "100vw";
+                    style.height = "100vh";
+                    return;
+                }
+                const outer = scroller();
+                let left = 0, right = 0, top = 0, bottom = 0, nothingAbove = !viewport.previousElementSibling;
+                for (let el = viewport.parentElement; el && el !== outer && el !== document.body; el = el.parentElement) {
+                    const cs = getComputedStyle(el);
+                    left += parseFloat(cs.paddingLeft) + parseFloat(cs.borderLeftWidth);
+                    right += parseFloat(cs.paddingRight) + parseFloat(cs.borderRightWidth);
+                    bottom += parseFloat(cs.paddingBottom) + parseFloat(cs.borderBottomWidth);
+                    if (nothingAbove) top += parseFloat(cs.paddingTop) + parseFloat(cs.borderTopWidth);
+                    if (el.previousElementSibling) nothingAbove = false;
+                }
+                style.margin = `${-top}px ${-right}px ${-bottom}px ${-left}px`;
+                style.width = `calc(100% + ${left + right}px)`;
+                style.height = Math.max(200, window.innerHeight - viewport.getBoundingClientRect().top) + "px";
+                // If the page would still scroll, take that much off
+                const excess = outer.scrollHeight - outer.clientHeight;
+                if (excess > 0) style.height = Math.max(200, viewport.clientHeight - excess) + "px";
+            };
+
+            // Re-lay out (and refit) after the viewport settles at a new size,
+            // unless the user has zoomed or panned
+            let relayoutTimer = null;
+            const relayoutSoon = force => {
+                clearTimeout(relayoutTimer);
+                relayoutTimer = setTimeout(() => {
+                    if (!viewport.isConnected) return;
+                    if (force || !userMoved) draw(null);
+                }, 200);
+            };
             if (window.ResizeObserver) {
-                new ResizeObserver(() => { if (!userMoved) fit(false); }).observe(viewport);
+                new ResizeObserver(() => {
+                    if (Math.abs(viewport.clientWidth - laidOutFor.width) > 20
+                        || Math.abs(viewport.clientHeight - laidOutFor.height) > 20) {
+                        relayoutSoon(false);
+                    }
+                }).observe(viewport);
             }
+
+            const onWindowResize = () => {
+                // Icinga replaces the diagram on refresh; drop listeners of old ones
+                if (!viewport.isConnected) {
+                    window.removeEventListener("resize", onWindowResize);
+                    return;
+                }
+                sizeToWindow();
+            };
+            window.addEventListener("resize", onWindowResize);
+            const onFullscreenChange = () => {
+                if (!viewport.isConnected) {
+                    document.removeEventListener("fullscreenchange", onFullscreenChange);
+                    document.removeEventListener("webkitfullscreenchange", onFullscreenChange);
+                    return;
+                }
+                sizeToWindow();
+                if (fullscreenButton) fullscreenButton.textContent = isFullscreen() ? "Exit full screen" : "Full screen";
+                relayoutSoon(true);
+            };
+            document.addEventListener("fullscreenchange", onFullscreenChange);
+            document.addEventListener("webkitfullscreenchange", onFullscreenChange);
+
+            sizeToWindow();
 
             return {
-                isFullscreen,
-                // The current view if the user zoomed or panned, else null (fit)
-                userView: () => userMoved ? d3.zoomTransform(svg.node()) : null,
-                setStatus: text => { status.textContent = text ? text + " \u00b7 " : ""; }
-            };
-        },
-
-
-        onRenderedContainer: function (event) {
-            const container = document.getElementById('clustergraph-container');
-            // in module configuration we don't have a graph, so return peacefully
-            if (!container) {
-                return;
-            }
-
-            const url = window.location.pathname + "/index/data";
-            const load = () => fetch(url, {cache: "no-store", headers: {Accept: "application/json"}})
-                .then(response => {
-                    if (!response.ok) throw new Error("HTTP " + response.status);
-                    return response.json();
-                });
-            const time = () => new Date().toLocaleTimeString();
-
-            // Only one refresh loop at a time, even if Icinga renders us again
-            if (this.stopRefresh) this.stopRefresh();
-
-            load().then(data => {
-                let current = this.chart(data);
-                container.replaceChildren(current);
-                current.clustergraph.setStatus("Updated " + time());
-
-                let busy = false;
-                let timer = null;
-                const stop = () => {
-                    clearInterval(timer);
-                    document.removeEventListener("visibilitychange", onVisible);
-                    if (this.stopRefresh === stop) this.stopRefresh = null;
-                };
-                const refresh = () => {
-                    if (!current.isConnected) {
-                        stop(); // navigated away
-                        return;
+                isConnected: () => viewport.isConnected,
+                setStatus: text => { status.textContent = text ? text + " \u00b7 " : ""; },
+                // New data: recolour in place if the shown hosts and dependencies
+                // are unchanged, else re-lay out (keeping the user's view)
+                setData: data => {
+                    fullData = {nodes: data.nodes || [], links: data.links || []};
+                    updatePicker();
+                    const visible = visibleData();
+                    if (drawn && structureOf(visible) === drawn.structure) {
+                        drawn.update(visible);
+                    } else {
+                        draw(drawn && userMoved ? d3.zoomTransform(svg.node()) : null);
                     }
-                    if (document.hidden || busy) return;
-                    busy = true;
-                    load().then(fresh => {
-                        if (!current.isConnected) return;
-                        const api = current.clustergraph;
-                        // Same hosts and dependencies (or in full screen, where a
-                        // rebuild would drop out of it): just recolour in place.
-                        // A changed structure is picked up after full screen ends.
-                        if (structureOf(fresh) === api.structure || api.isFullscreen()) {
-                            api.updateStates(fresh);
-                        } else {
-                            const next = this.chart(fresh, api.userView());
-                            container.replaceChildren(next);
-                            current = next;
-                        }
-                        current.clustergraph.setStatus("Updated " + time());
-                    }).catch(() => {
-                        if (current.isConnected) current.clustergraph.setStatus("Update failed, retrying");
-                    }).finally(() => { busy = false; });
-                };
-                // Catch up straight away when the tab becomes visible again
-                const onVisible = () => { if (!document.hidden) refresh(); };
-                document.addEventListener("visibilitychange", onVisible);
-                timer = setInterval(refresh, REFRESH_MS);
-                this.stopRefresh = stop;
-            }).catch(error => {
-                const message = document.createElement("p");
-                message.textContent = "Could not load the graph (" + error.message + "). Reload the page to try again.";
-                container.replaceChildren(message);
-            });
+                }
+            };
         }
     };
 
