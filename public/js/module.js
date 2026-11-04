@@ -123,7 +123,7 @@
 
             const {columns, layerCount} = layout(nodes, links);
 
-            const fontSize = 11;    // about 80% of the original 14px
+            const fontSize = 13;
             const rowHeight = 24;
             const padding = 16;
             const labelOffset = 10; // circle centre to the end of its label (labels sit left of the dot)
