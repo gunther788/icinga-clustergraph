@@ -42,9 +42,8 @@ The layout tries to:
 ## Using it
 
 - **Moving around:**
-  - Drag to move the diagram.
-  - Pinch, or hold Ctrl (⌘ on a Mac) and scroll, to zoom.
-  - Plain scrolling moves the diagram until it reaches an edge, then scrolls the page.
+  - Scroll the mouse wheel, or pinch on a trackpad, to zoom in and out around the pointer.
+  - Drag to move the diagram, or hold Shift and scroll.
 - **Buttons** (top right): zoom in, zoom out, **Fit** (the whole diagram), **1:1** (100%) and **Full screen** (Esc to
   leave).
 - **Showing a subset:** the host button (it reads **All hosts ▾** until you choose) opens a checklist of every host
