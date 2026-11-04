@@ -8,6 +8,7 @@ ini_set('display_errors', '1');
 
 use Icinga\Application\Icinga;
 use Icinga\Application\Logger;
+use Icinga\Module\Clustergraph\Common\GraphBuilder;
 use Icinga\Module\Clustergraph\Common\IcingaApi;
 use Icinga\Module\Clustergraph\Common\IcingaDbZones;
 use Icinga\Module\Clustergraph\Common\IdoZones;
@@ -66,6 +67,7 @@ class IndexController extends Controller
         $hosts = $api->sendCommand(
             'GET',
             'objects/hosts?attrs=name&attrs=display_name&attrs=state&attrs=last_check&attrs=groups&attrs=zone'
+            . '&attrs=last_reachable&attrs=acknowledgement&attrs=downtime_depth'
         );
         $dependencies = $api->sendCommand(
             'GET',
@@ -76,61 +78,28 @@ class IndexController extends Controller
             throw new \Exception("Failed to fetch or decode data from the Icinga2 API.");
         }
 
-        $hostsByName = [];
-        $synthetic = [];
-        foreach ($hosts as $host) {
-            $hostsByName[$host['name']] = $host;
-            if (in_array('synthetic', $host['attrs']['groups'] ?? [], true)) {
-                $synthetic[$host['name']] = true;
+        // Every host in the "synthetic" group, plus direct parents and children
+        $selection = GraphBuilder::select($hosts, $dependencies, 'synthetic');
+
+        // Services of the drawn hosts, filtered on the Icinga side. Without
+        // them (no services, or the API user may not query them) the graph is
+        // drawn without service problem rings.
+        $services = [];
+        if ($selection['names']) {
+            try {
+                $services = $api->sendCommand(
+                    'GET',
+                    'objects/services?attrs=host_name&attrs=state&attrs=last_check'
+                    . '&attrs=acknowledgement&attrs=downtime_depth',
+                    ['filter' => 'host.name in names', 'filter_vars' => ['names' => $selection['names']]]
+                );
+            } catch (\Exception $e) {
+                Logger::warning('clustergraph: could not fetch services: %s', $e->getMessage());
+                $services = null;
             }
         }
 
-        // Host-to-host edges (parent -> child) that touch at least one synthetic
-        // host. Service dependencies (child_service_name set) are ignored.
-        $links = [];
-        foreach ($dependencies as $dependency) {
-            $attrs = $dependency['attrs'];
-            if (!empty($attrs['child_service_name'])) {
-                continue;
-            }
-            $parent = $attrs['parent_host_name'] ?? '';
-            $child = $attrs['child_host_name'] ?? '';
-            if ($parent === '' || $child === '' || $parent === $child) {
-                continue;
-            }
-            if (!isset($synthetic[$parent]) && !isset($synthetic[$child])) {
-                continue;
-            }
-            $links[$parent . "\0" . $child] = ['source' => $parent, 'target' => $child];
-        }
-
-        // Nodes: every synthetic host, plus any direct parent or child outside
-        // the group so the relationship stays visible.
-        $nodeNames = $synthetic;
-        foreach ($links as $link) {
-            $nodeNames[$link['source']] = true;
-            $nodeNames[$link['target']] = true;
-        }
-
-        $nodes = [];
-        foreach (array_keys($nodeNames) as $name) {
-            $name = (string) $name; // PHP turns numeric string keys into ints
-            $host = $hostsByName[$name] ?? null;
-            $nodes[] = [
-                'name'       => $name,
-                'label'      => $host['attrs']['display_name'] ?? $name,
-                'state'      => $host['attrs']['state'] ?? null,
-                'last_check' => $host['attrs']['last_check'] ?? null,
-                'zone'       => $host['attrs']['zone'] ?? null,
-                'synthetic'  => isset($synthetic[$name]),
-                'link'       => $ICINGAWEB_HOST_PATH . rawurlencode($name)
-            ];
-        }
-
-        $this->_helper->json([
-            'nodes' => $nodes,
-            'links' => array_values($links)
-        ]);
+        $this->_helper->json(GraphBuilder::build($selection, $hosts, $services, $ICINGAWEB_HOST_PATH));
     }
 
 
