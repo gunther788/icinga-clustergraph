@@ -780,9 +780,9 @@
          * drawing in place.
          *
          * Controls: a picker to show only one bottom-level host and everything
-         * above it, zoom in/out, fit, 100% and full screen. Drag to move, pinch
-         * or Ctrl/Cmd + scroll to zoom; plain scrolling moves the diagram while
-         * it has somewhere to go and otherwise scrolls the page.
+         * above it, zoom in/out, fit, 100% and full screen. Scroll (or pinch) to
+         * zoom around the pointer, drag to move; Shift + scroll also moves the
+         * diagram.
          */
         mount: function (container) {
             const navigation = document.getElementById("navigation");
@@ -841,8 +841,9 @@
 
             const zoom = d3.zoom()
                 .scaleExtent([0.1, 4])
-                // Wheel zooms only with Ctrl/Cmd (trackpad pinch sends ctrlKey too)
-                .filter(event => event.type === "wheel" ? (event.ctrlKey || event.metaKey) : !event.button)
+                // The wheel zooms around the pointer; with Shift held it moves the
+                // diagram instead (see wheel.pan below)
+                .filter(event => event.type === "wheel" ? !event.shiftKey : !event.button)
                 // Gentle steps for a mouse wheel; trackpad pinches send small
                 // deltas, so those get boosted to feel natural
                 .wheelDelta(event => {
@@ -855,12 +856,14 @@
                 });
             svg.call(zoom).on("dblclick.zoom", null);
 
-            // Plain wheel / two-finger scroll pans the diagram
+            // Shift + scroll moves the diagram. Some browsers turn Shift + wheel
+            // into a sideways scroll (deltaX), so take whichever is set and move
+            // vertically for deltaY and sideways for deltaX.
             svg.on("wheel.pan", event => {
-                if (event.ctrlKey || event.metaKey) return;
+                if (!event.shiftKey) return;
                 const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? viewport.clientHeight : 1;
-                const dx = (event.shiftKey && !event.deltaX ? event.deltaY : event.deltaX) * unit;
-                const dy = (event.shiftKey && !event.deltaX ? 0 : event.deltaY) * unit;
+                const dx = event.deltaX * unit;
+                const dy = event.deltaY * unit;
                 const before = d3.zoomTransform(svg.node());
                 zoom.translateBy(svg, -dx / before.k, -dy / before.k);
                 const after = d3.zoomTransform(svg.node());
@@ -1155,7 +1158,7 @@
             const hint = document.createElement("div");
             hint.className = "clustergraph-hint";
             const status = document.createElement("span");
-            hint.append(status, "Drag to move \u00b7 Ctrl/\u2318 + scroll or pinch to zoom");
+            hint.append(status, "Scroll to zoom \u00b7 Drag or Shift + scroll to move");
             viewport.append(hint);
 
             // --- Sizing ----------------------------------------------------------
