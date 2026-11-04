@@ -58,16 +58,18 @@
         return isProblem(node) && !!(node.acknowledged || node.in_downtime);
     }
 
-    // One line describing a host's services for the hover text
-    function servicesText(services) {
+    // One line describing a host's services for the hover text; notifiedOnly
+    // when services with notifications disabled are left out
+    function servicesText(services, notifiedOnly) {
+        const what = notifiedOnly ? "services with notifications" : "services";
         if (services === null || services === undefined) return "services: not available";
-        if (!services.total) return "services: none";
+        if (!services.total) return what + ": none";
         const parts = ["critical", "warning", "unknown", "pending"]
             .filter(state => services[state])
             .map(state => services[state] + " " + state);
         const problems = services.critical + services.warning + services.unknown;
         if (problems > services.unhandled) parts.push((problems - services.unhandled) + " handled");
-        return "services: " + services.total + (parts.length ? " (" + parts.join(", ") + ")" : ", all OK");
+        return what + ": " + services.total + (parts.length ? " (" + parts.join(", ") + ")" : ", all OK");
     }
 
     // How often to fetch fresh host states while the page is visible, unless
@@ -729,14 +731,20 @@
         };
     }
 
-    // The selected hosts live in the page URL (?host=a&host=b), so a subset can
-    // be bookmarked or shared
-    const URL_PARAM = "host";
-    const readSelection = () => new URLSearchParams(window.location.search).getAll(URL_PARAM);
-    const writeSelection = (names, container) => {
+    // What is shown lives in the page URL, so it can be bookmarked or shared:
+    // ?host=a&host=b for a subset, and ?services=notified to leave out services
+    // with notifications disabled
+    const readUrlState = () => {
+        const params = new URLSearchParams(window.location.search);
+        return {hosts: params.getAll("host"), notifiedOnly: params.get("services") === "notified"};
+    };
+    const writeUrlState = (state, container) => {
         const url = new URL(window.location.href);
-        url.searchParams.delete(URL_PARAM);
-        names.forEach(name => url.searchParams.append(URL_PARAM, name));
+        // Always written in the same order: hosts first, then the option
+        url.searchParams.delete("host");
+        url.searchParams.delete("services");
+        state.hosts.forEach(name => url.searchParams.append("host", name));
+        if (state.notifiedOnly) url.searchParams.append("services", "notified");
         if (url.href !== window.location.href) {
             // Replace rather than push: Icinga keeps its own history entries,
             // and its state object is kept as it is
@@ -951,7 +959,13 @@
 
             let fullData = {nodes: [], links: []};
             let hostGroup = "synthetic"; // from the module settings, sent with the data
-            let selected = readSelection(); // host names; empty means all hosts
+            const urlState = readUrlState();
+            let selected = urlState.hosts; // host names; empty means all hosts
+            let notifiedOnly = urlState.notifiedOnly; // ignore services with notifications disabled
+            const updateUrl = () => writeUrlState({hosts: selected, notifiedOnly}, container);
+            // The service summary to show: all services, or only those with
+            // notifications enabled (falls back if the server doesn't send it)
+            const serviceSummary = d => notifiedOnly && d.services_notified !== undefined ? d.services_notified : d.services;
             let drawn = null; // {structure, update(data)} for what is on screen
             let laidOutFor = {width: 0, height: 0};
 
@@ -967,7 +981,7 @@
                 laidOutFor = {width: viewport.clientWidth, height: viewport.clientHeight};
                 const area = drawingArea();
                 if (!nodes.length) {
-                    drawn = {structure: structureOf(data), update: () => {}};
+                    drawn = {structure: structureOf(data), update: () => {}, restyle: () => {}};
                     return;
                 }
 
@@ -1058,17 +1072,20 @@
                             + (d.acknowledged ? ", acknowledged" : "")
                             + (d.in_downtime ? ", in downtime" : ""),
                         stateName(d) === "unreachable" ? "(down because a parent is down)" : null,
-                        servicesText(d.services),
+                        servicesText(serviceSummary(d), notifiedOnly),
                         d.zone ? "zone: " + d.zone : null,
                         d.synthetic ? null : "not in the " + hostGroup + " host group"
                     ].filter(Boolean).join("\n"));
-                    const ringState = d => d.services && (d.services.worst_unhandled
-                        || (d.services.worst !== "ok" ? d.services.worst : null));
+                    const ringState = d => {
+                        const summary = serviceSummary(d);
+                        return summary && (summary.worst_unhandled || (summary.worst && summary.worst !== "ok" ? summary.worst : null));
+                    };
+                    const allHandled = d => !!serviceSummary(d) && !serviceSummary(d).worst_unhandled;
                     rings
                         .attr("display", d => ringState(d) ? null : "none")
                         .attr("stroke", d => COLOURS[ringState(d)] || "none")
-                        .attr("stroke-dasharray", d => d.services && !d.services.worst_unhandled ? "2,2" : null)
-                        .attr("stroke-opacity", d => d.services && !d.services.worst_unhandled ? 0.6 : 1);
+                        .attr("stroke-dasharray", d => allHandled(d) ? "2,2" : null)
+                        .attr("stroke-opacity", d => allHandled(d) ? 0.6 : 1);
                     circles
                         .attr("fill", d => stateColor(d))
                         .attr("fill-opacity", d => isHandled(d) ? 0.45 : 1);
@@ -1138,9 +1155,12 @@
                             shown.acknowledged = n.acknowledged;
                             shown.in_downtime = n.in_downtime;
                             shown.services = n.services;
+                            shown.services_notified = n.services_notified;
                         });
                         applyStates();
-                    }
+                    },
+                    // Recolour after the notified-services option changes
+                    restyle: applyStates
                 };
 
                 if (view) {
@@ -1183,7 +1203,7 @@
                     : selected.length === 1 ? (fullData.nodes.find(n => n.name === selected[0]) || {label: selected[0]}).label + " \u25be"
                     : selected.length + " hosts \u25be";
                 list.querySelectorAll("input").forEach(box => box.checked = selected.includes(box.value));
-                writeSelection(selected, container);
+                updateUrl();
             };
             const choose = names => {
                 selected = names;
@@ -1242,7 +1262,21 @@
             // from bubbling up to the document
             document.addEventListener("mousedown", onOutsideClick, true);
             panel.addEventListener("keydown", event => { if (event.key === "Escape") closePanel(); });
-            controls.append(pickerButton);
+            // Option: leave out services with notifications disabled
+            const notifiedToggle = document.createElement("label");
+            notifiedToggle.className = "topologygraph-toggle";
+            notifiedToggle.title = "Leave out services with notifications disabled from the rings and counts";
+            const notifiedBox = document.createElement("input");
+            notifiedBox.type = "checkbox";
+            notifiedBox.checked = notifiedOnly;
+            notifiedBox.addEventListener("change", () => {
+                notifiedOnly = notifiedBox.checked;
+                updateUrl();
+                if (drawn) drawn.restyle();
+            });
+            notifiedToggle.append(notifiedBox, " Notified services only");
+
+            controls.append(notifiedToggle, pickerButton);
             viewport.append(panel);
 
             const isFullscreen = () =>

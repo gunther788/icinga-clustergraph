@@ -66,6 +66,10 @@ The layout tries to:
   https://icinga.example.com/icingaweb2/topologygraph?host=db-1&host=cache-1
   ```
 
+- **Ignoring services without notifications:** tick **Notified services only** to leave out services that have
+  notifications disabled. They then don't count towards the service rings or the counts in the hover text. The
+  option is kept in the page address as `services=notified`, and combines with a host selection, for example
+  `…/topologygraph?host=db-1&services=notified`.
 - **Live updates:** while the page is visible, the graph fetches fresh data at the refresh interval (15 seconds by
   default) and catches up straight away when you return to the tab. A change of host state only recolours the existing drawing, so your zoom and
   position stay put. If hosts or dependencies were added or removed, the graph is laid out again. The bottom-right

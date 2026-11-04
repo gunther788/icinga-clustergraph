@@ -72,12 +72,13 @@ final class GraphBuilder
      * A service is pending until its first check, and a problem (warning,
      * critical or unknown) is handled when it is acknowledged or in downtime.
      *
-     * @param array $services API results from objects/services
+     * @param array $services     API results from objects/services
+     * @param bool  $onlyNotified Leave out services with notifications disabled
      *
      * @return array host name => ['total', 'ok', 'warning', 'critical', 'unknown', 'pending',
      *                             'unhandled', 'worst', 'worst_unhandled']
      */
-    public static function summariseServices(array $services)
+    public static function summariseServices(array $services, $onlyNotified = false)
     {
         $names = [0 => 'ok', 1 => 'warning', 2 => 'critical', 3 => 'unknown'];
         $summary = [];
@@ -85,6 +86,9 @@ final class GraphBuilder
             $attrs = $service['attrs'] ?? [];
             $host = (string) ($attrs['host_name'] ?? '');
             if ($host === '') {
+                continue;
+            }
+            if ($onlyNotified && ($attrs['enable_notifications'] ?? true) === false) {
                 continue;
             }
             if (! isset($summary[$host])) {
@@ -134,6 +138,7 @@ final class GraphBuilder
             $hostsByName[(string) $host['name']] = $host['attrs'] ?? [];
         }
         $serviceSummary = $services === null ? null : self::summariseServices($services);
+        $notifiedSummary = $services === null ? null : self::summariseServices($services, true);
         $noServices = [
             'total' => 0, 'ok' => 0, 'warning' => 0, 'critical' => 0, 'unknown' => 0, 'pending' => 0,
             'unhandled' => 0, 'worst' => null, 'worst_unhandled' => null
@@ -154,6 +159,8 @@ final class GraphBuilder
                 'in_downtime'  => ($attrs['downtime_depth'] ?? 0) > 0,
                 // null: service details unavailable (e.g. no permission)
                 'services'     => $serviceSummary === null ? null : ($serviceSummary[$name] ?? $noServices),
+                // The same, counting only services with notifications enabled
+                'services_notified' => $notifiedSummary === null ? null : ($notifiedSummary[$name] ?? $noServices),
                 'synthetic'    => isset($selection['synthetic'][$name]),
                 'link'         => $hostPath . rawurlencode($name)
             ];

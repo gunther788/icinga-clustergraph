@@ -83,6 +83,21 @@ check('services: only handled problems leave no unhandled worst', [
 ], ['critical', null, 0]);
 check('services: all OK', [$summary['db-1']['worst'], $summary['db-1']['unhandled']], ['ok', 0]);
 
+// --- summariseServices() with only notified services ------------------------
+
+$mixed = [
+    service('probe-a', 2, ['enable_notifications' => false]), // critical, but nobody is notified
+    service('probe-a', 1, ['enable_notifications' => true]),
+    service('probe-a', 0),                                    // no attribute: treated as enabled
+    service('db-1', 2, ['enable_notifications' => false])     // the host's only service
+];
+$all = GraphBuilder::summariseServices($mixed);
+$notified = GraphBuilder::summariseServices($mixed, true);
+check('notified only: all services counted by default', [$all['probe-a']['total'], $all['probe-a']['worst_unhandled']], [3, 'critical']);
+check('notified only: services with notifications disabled are left out',
+    [$notified['probe-a']['total'], $notified['probe-a']['critical'], $notified['probe-a']['worst_unhandled']], [2, 0, 'warning']);
+check('notified only: a host with only such services has no entry', isset($notified['db-1']), false);
+
 // --- build() ----------------------------------------------------------------
 
 $hosts[0]['attrs'] += ['state' => 1, 'last_check' => 5, 'last_reachable' => false, 'zone' => 'z1'];
@@ -105,5 +120,18 @@ check('build: links passed through', $graph['links'], $selection['links']);
 
 $withoutServices = GraphBuilder::build($selection, $hosts, null, '/x?host=');
 check('build: services null when they could not be fetched', $withoutServices['nodes'][0]['services'], null);
+check('build: notified summary null too', $withoutServices['nodes'][0]['services_notified'], null);
+
+$graphMixed = GraphBuilder::build($selection, $hosts, $mixed, '/x?host=');
+$mixedByName = [];
+foreach ($graphMixed['nodes'] as $node) {
+    $mixedByName[$node['name']] = $node;
+}
+check('build: both summaries attached', [
+    $mixedByName['probe-a']['services']['worst_unhandled'], $mixedByName['probe-a']['services_notified']['worst_unhandled']
+], ['critical', 'warning']);
+check('build: notified summary empty for a host with only silenced services', [
+    $mixedByName['db-1']['services']['total'], $mixedByName['db-1']['services_notified']['total']
+], [1, 0]);
 
 finish();
