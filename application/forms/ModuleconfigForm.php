@@ -64,6 +64,21 @@ class ModuleconfigForm extends ConfigForm
             'required' => true,
         ]);
 
+        $this->addElement('text', 'graph_hostgroup', [
+            'label' => 'Host group',
+            'description' => 'Hosts in this group are drawn, with their direct parents and children',
+            'value' => 'synthetic',
+            'required' => true,
+        ]);
+
+        $this->addElement('number', 'graph_refresh', [
+            'label' => 'Refresh interval',
+            'description' => 'Seconds between updates while the graph is open (at least 5)',
+            'value' => '15',
+            'min' => 5,
+            'required' => true,
+        ]);
+
     }
 
     public function onRequest()
@@ -103,20 +118,6 @@ class ModuleconfigForm extends ConfigForm
                 }
             }
         }
-        $graphResource = "graph";
-        if ($graphResource !== null && $this->config->hasSection($graphResource)) {
-            $graphConfig = $this->config->getSection($graphResource)->toArray();
-            $name = $element->getName();
-            $name2 = str_replace($graphResource . "_", "", $name);
-            if (isset($values[$name])) {
-                if (isset($graphConfig[$name2])) {
-                    $values[$name] = $graphConfig[$name2];
-                } else {
-                    unset($values[$name]);
-                }
-            }
-        }
-
         return $values;
     }
 

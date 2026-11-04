@@ -70,8 +70,10 @@
         return "services: " + services.total + (parts.length ? " (" + parts.join(", ") + ")" : ", all OK");
     }
 
-    // How often to fetch fresh host states while the page is visible
+    // How often to fetch fresh host states while the page is visible, unless
+    // the server says otherwise (the module's "Refresh interval" setting)
     const REFRESH_MS = 15000;
+    const refreshInterval = data => data && data.refresh >= 5 ? data.refresh * 1000 : REFRESH_MS;
 
     /**
      * Everything that affects the layout (hosts, their labels and group
@@ -794,6 +796,12 @@
                         if (!graph.isConnected()) return;
                         graph.setData(fresh);
                         graph.setStatus("Updated " + time());
+                        // Follow a changed refresh interval setting
+                        if (refreshInterval(fresh) !== interval) {
+                            interval = refreshInterval(fresh);
+                            clearInterval(timer);
+                            timer = setInterval(refresh, interval);
+                        }
                     }).catch(() => {
                         if (graph.isConnected()) graph.setStatus("Update failed, retrying");
                     }).finally(() => { busy = false; });
@@ -801,7 +809,8 @@
                 // Catch up straight away when the tab becomes visible again
                 const onVisible = () => { if (!document.hidden) refresh(); };
                 document.addEventListener("visibilitychange", onVisible);
-                timer = setInterval(refresh, REFRESH_MS);
+                let interval = refreshInterval(data);
+                timer = setInterval(refresh, interval);
                 this.stopRefresh = stop;
             }).catch(error => {
                 const message = document.createElement("p");
@@ -876,7 +885,6 @@
 
             const emptyMessage = document.createElement("p");
             emptyMessage.className = "clustergraph-empty";
-            emptyMessage.textContent = 'No hosts found in the "synthetic" host group.';
             emptyMessage.hidden = true;
             viewport.append(emptyMessage);
 
@@ -942,6 +950,7 @@
             // --- Data, subset and drawing ---------------------------------------
 
             let fullData = {nodes: [], links: []};
+            let hostGroup = "synthetic"; // from the module settings, sent with the data
             let selected = readSelection(); // host names; empty means all hosts
             let drawn = null; // {structure, update(data)} for what is on screen
             let laidOutFor = {width: 0, height: 0};
@@ -954,6 +963,7 @@
                 const links = data.links || [];
                 content.selectAll("*").remove();
                 emptyMessage.hidden = nodes.length > 0;
+                emptyMessage.textContent = `No hosts found in the "${hostGroup}" host group.`;
                 laidOutFor = {width: viewport.clientWidth, height: viewport.clientHeight};
                 const area = drawingArea();
                 if (!nodes.length) {
@@ -1050,7 +1060,7 @@
                         stateName(d) === "unreachable" ? "(down because a parent is down)" : null,
                         servicesText(d.services),
                         d.zone ? "zone: " + d.zone : null,
-                        d.synthetic ? null : "not in the synthetic host group"
+                        d.synthetic ? null : "not in the " + hostGroup + " host group"
                     ].filter(Boolean).join("\n"));
                     const ringState = d => d.services && (d.services.worst_unhandled
                         || (d.services.worst !== "ok" ? d.services.worst : null));
@@ -1404,6 +1414,7 @@
                 // are unchanged, else re-lay out (keeping the user's view)
                 setData: data => {
                     fullData = {nodes: data.nodes || [], links: data.links || []};
+                    hostGroup = data.hostgroup || "synthetic";
                     updatePicker();
                     const visible = visibleData();
                     if (drawn && structureOf(visible) === drawn.structure) {
