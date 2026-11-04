@@ -1,8 +1,8 @@
 .clustergraph {
   max-width: 100%;
   height: auto;
-  overflow: auto; // To handle larger graphs
-  margin: 10px 0; // Example spacing
+  overflow: visible; // the viewport inside does its own zooming and panning
+  margin: 0;
 }
 
 .clustergraph svg {
@@ -25,6 +25,13 @@
 
   &:active {
     cursor: grabbing;
+  }
+
+  &:fullscreen {
+    width: 100vw;
+    height: 100vh;
+    border: 0;
+    border-radius: 0;
   }
 
   a {
