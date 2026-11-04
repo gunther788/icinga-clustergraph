@@ -16,8 +16,8 @@ The upstream module asks the Icinga 2 API for zones and endpoints and draws them
   and the parent → child links between them. Only host-to-host dependencies are used; service dependencies are ignored.
 - **Drawing:** `public/js/module.js` replaces the zone tree with a layered dependency graph built with D3, described
   below.
-- **Permissions:** the API user needs `objects/query/Host` and `objects/query/Dependency` instead of the zone and
-  endpoint permissions.
+- **Permissions:** the API user needs `objects/query/Host`, `objects/query/Dependency` and
+  `objects/query/Service` instead of the zone and endpoint permissions.
 
 Everything else (installation, the module settings page, the `clustergraph` URL and menu entry) works as before.
 
@@ -28,10 +28,16 @@ Everything else (installation, the module settings page, the `clustergraph` URL 
   Hosts that are parents of exactly the same children are drawn together in one rounded box with a single exit point
   for their arrows. That column is wrapped into several side-by-side sub-columns, so a long list of checks doesn't
   make the graph very tall.
-- **Colours:** dots and names show host state: green for up, red for down, blue for pending, grey for unknown.
-  Arrows into a host that is down are red too.
-- **Hosts outside the group:** they're drawn faded and in italics. Hover over any host for its name, state and zone,
-  and click it to open the host in Icinga Web.
+- **Colours:** dots and names show host state: green for up, red for down, purple for unreachable (down only
+  because a parent is down), blue for pending, grey for unknown. Problems that are acknowledged or in downtime are
+  faded. Arrows take the colour of the host they point at.
+- **Service problems:** a ring around a host's dot shows its worst service problem: red for critical, orange for
+  warning, purple for unknown. The ring is solid while any problem is unhandled, and dashed and faded when all of
+  them are acknowledged or in downtime. A legend in the bottom-left corner explains the colours.
+- **Hosts outside the group:** they're drawn faded and in italics.
+- **Hovering a host:** highlights everything above and below it, along with the arrows on those chains, and dims
+  the rest. The hover text shows the host's state, its service counts and its zone. Click a host to open it in
+  Icinga Web.
 
 The layout tries to:
 
@@ -99,7 +105,7 @@ apply Dependency "host-parent" for (parent in host.vars.parents) to Host {
    ```
    object ApiUser "clustergraph" {
      password = "change-me"
-     permissions = [ "objects/query/Host", "objects/query/Dependency" ]
+     permissions = [ "objects/query/Host", "objects/query/Dependency", "objects/query/Service" ]
    }
    ```
 
@@ -115,6 +121,14 @@ These are constants in the code rather than settings:
 - **Host group:** `synthetic`, in `application/controllers/IndexController.php`.
 - **Refresh interval:** `REFRESH_MS` (15 seconds), near the top of `public/js/module.js`.
 - **Font size and base spacing:** `FONT_SIZE` and `BASE`, also in `public/js/module.js`.
+
+Without `objects/query/Service` the graph still works, but without service rings. The hover text then says that
+service details are not available.
+
+## Tests
+
+The `tests/` folder has PHP tests for the data the module sends and browser tests for the graph itself. See
+[tests/README.md](tests/README.md) for how to run them.
 
 ## Limitations
 

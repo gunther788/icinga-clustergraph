@@ -1,0 +1,127 @@
+{
+ "nodes": [
+  {
+   "name": "core-router",
+   "label": "core-router",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": false,
+   "link": "#core-router"
+  },
+  {
+   "name": "fw-1",
+   "label": "fw-1",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#fw-1"
+  },
+  {
+   "name": "fw-2",
+   "label": "fw-2",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#fw-2"
+  },
+  {
+   "name": "lb-1",
+   "label": "lb-1",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#lb-1"
+  },
+  {
+   "name": "web-1",
+   "label": "web-1",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#web-1"
+  },
+  {
+   "name": "web-2",
+   "label": "web-2",
+   "state": 1,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#web-2"
+  },
+  {
+   "name": "api-1",
+   "label": "api-1",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#api-1"
+  },
+  {
+   "name": "db-1",
+   "label": "db-1",
+   "state": 0,
+   "last_check": 0,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#db-1"
+  },
+  {
+   "name": "standalone",
+   "label": "standalone",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#standalone"
+  }
+ ],
+ "links": [
+  {
+   "source": "core-router",
+   "target": "fw-1"
+  },
+  {
+   "source": "core-router",
+   "target": "fw-2"
+  },
+  {
+   "source": "fw-1",
+   "target": "lb-1"
+  },
+  {
+   "source": "fw-2",
+   "target": "lb-1"
+  },
+  {
+   "source": "lb-1",
+   "target": "web-1"
+  },
+  {
+   "source": "lb-1",
+   "target": "web-2"
+  },
+  {
+   "source": "lb-1",
+   "target": "api-1"
+  },
+  {
+   "source": "web-1",
+   "target": "db-1"
+  },
+  {
+   "source": "api-1",
+   "target": "db-1"
+  },
+  {
+   "source": "fw-2",
+   "target": "api-1"
+  }
+ ]
+}

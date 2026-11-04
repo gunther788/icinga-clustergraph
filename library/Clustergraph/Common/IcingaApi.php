@@ -22,10 +22,13 @@ class IcingaApi
     /**
      * Send the given command to the icinga2's REST API
      *
+     * @param string     $method   HTTP method (sent as an override on a POST)
+     * @param string     $endpoint Path below /v1/, with any query string
+     * @param array|null $body     Optional JSON body, e.g. a filter with filter_vars
      *
      * @return mixed
      */
-    public function sendCommand($method="GET", $endpoint='objects/zones')
+    public function sendCommand($method="GET", $endpoint='objects/zones', $body = null)
     {
         $transport =Config::module('clustergraph')->getSection("api")->toArray();
 
@@ -35,13 +38,16 @@ class IcingaApi
         }
 
         try {
-            $response = (new Client())
-                ->post($this->getUriFor($endpoint,$transport), [
-                    'auth'          => [$transport['username'], $transport['password']],
-                    'headers'       => $headers,
-                    'http_errors'   => false,
-                    'verify'        => false
-                ]);
+            $options = [
+                'auth'          => [$transport['username'], $transport['password']],
+                'headers'       => $headers,
+                'http_errors'   => false,
+                'verify'        => false
+            ];
+            if ($body !== null) {
+                $options['json'] = $body;
+            }
+            $response = (new Client())->post($this->getUriFor($endpoint,$transport), $options);
         } catch (GuzzleException $e) {
 
             throw new HttpException(
@@ -62,7 +68,8 @@ class IcingaApi
 
         if (! isset($responseData['results']) || empty($responseData['results'])) {
             if (isset($responseData['error'])) {
-                if($responseData['error'] === 409){
+                // 404 is "No objects found" for a filter that matches nothing
+                if($responseData['error'] === 409 || $responseData['error'] === 404){
                     return [];
                 }
                 throw new HttpException(

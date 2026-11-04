@@ -16,18 +16,58 @@
         return `#${toHex(match[1])}${toHex(match[2])}${toHex(match[3])}`;
     }
 
-    function stateColor(node) {
-        if (node.state === null || node.state === undefined) return "#dbdbdb"; // unknown host
-        if (!node.last_check || node.last_check <= 0) return "#77aaff";        // Pending
-        if (node.state === 0) return "#44bb77";                                // Up
-        if (node.state === 1) return "#ff5566";                                // Down
-        return "#dbdbdb";
-    }
+    // Colours as Icinga Web uses them
+    const COLOURS = {
+        up: "#44bb77",
+        down: "#ff5566",
+        unreachable: "#aa44ff",
+        pending: "#77aaff",
+        unknownHost: "#dbdbdb",
+        warning: "#ffaa44",
+        critical: "#ff5566",
+        unknown: "#aa44ff",
+        edge: "#00c3ed"
+    };
 
     function stateName(node) {
         if (node.state === null || node.state === undefined) return "unknown";
         if (!node.last_check || node.last_check <= 0) return "pending";
-        return node.state === 0 ? "up" : "down";
+        if (node.state === 0) return "up";
+        // Down only because a parent is down
+        return node.reachable === false ? "unreachable" : "down";
+    }
+
+    function stateColor(node) {
+        switch (stateName(node)) {
+            case "up": return COLOURS.up;
+            case "down": return COLOURS.down;
+            case "unreachable": return COLOURS.unreachable;
+            case "pending": return COLOURS.pending;
+            default: return COLOURS.unknownHost;
+        }
+    }
+
+    // A host problem (down or unreachable)
+    function isProblem(node) {
+        const state = stateName(node);
+        return state === "down" || state === "unreachable";
+    }
+
+    // A problem someone already knows about: acknowledged or in downtime
+    function isHandled(node) {
+        return isProblem(node) && !!(node.acknowledged || node.in_downtime);
+    }
+
+    // One line describing a host's services for the hover text
+    function servicesText(services) {
+        if (services === null || services === undefined) return "services: not available";
+        if (!services.total) return "services: none";
+        const parts = ["critical", "warning", "unknown", "pending"]
+            .filter(state => services[state])
+            .map(state => services[state] + " " + state);
+        const problems = services.critical + services.warning + services.unknown;
+        if (problems > services.unhandled) parts.push((problems - services.unhandled) + " handled");
+        return "services: " + services.total + (parts.length ? " (" + parts.join(", ") + ")" : ", all OK");
     }
 
     // How often to fetch fresh host states while the page is visible
@@ -439,12 +479,15 @@
                     return {
                         source: {x: p.x - LABEL_OFFSET - labelWidth.get(l.source) - 5, y: p.y},
                         target: coords.get(l.target),
-                        child: l.target
+                        child: l.target,
+                        parents: [l.source]
                     };
                 });
             boxes.forEach(box => {
                 const start = {x: box.x0, y: (box.y0 + box.y1) / 2};
-                box.children.forEach(child => edges.push({source: start, target: coords.get(child), child}));
+                box.children.forEach(child => edges.push({
+                    source: start, target: coords.get(child), child, parents: box.names
+                }));
             });
 
             // Where each host's edges start, for ordering its children
@@ -799,8 +842,6 @@
                 }
             }
 
-            const edgeBlue = "#00c3ed";
-            const downRed = "#ff5566";
 
             const viewport = document.createElement("div");
             viewport.className = "clustergraph-viewport";
@@ -811,7 +852,11 @@
                 .attr("height", "100%")
                 .attr("style", "display: block; touch-action: none; font: " + FONT_SIZE + "px sans-serif;");
             const defs = svg.append("defs");
-            [["clustergraph-arrow", edgeBlue], ["clustergraph-arrow-down", downRed]].forEach(([id, colour]) => {
+            // One arrowhead per arrow colour
+            const arrowColours = [COLOURS.edge, COLOURS.down, COLOURS.unreachable];
+            const markerFor = colour => "url(#clustergraph-arrow-" + arrowColours.indexOf(colour) + ")";
+            arrowColours.forEach((colour, i) => {
+                const id = "clustergraph-arrow-" + i;
                 defs.append("marker")
                     .attr("id", id)
                     .attr("viewBox", "0 -5 10 10")
@@ -924,11 +969,16 @@
                 zoom.translateExtent([[-margin, -margin], [width + margin, height + margin]]);
 
                 const nodeByName = new Map(nodes.map(n => [n.name, n]));
-                const pointsAtRed = e => stateColor(nodeByName.get(e.child)) === downRed;
+                // Arrows take the colour of a child that is down or unreachable;
+                // handled problems are faded
+                const childOf = e => nodeByName.get(e.child);
+                const arrowColour = e => isProblem(childOf(e)) ? stateColor(childOf(e)) : COLOURS.edge;
+                const arrowOpacity = e => !isProblem(childOf(e)) ? 0.5 : isHandled(childOf(e)) ? 0.35 : 0.85;
+                const arrowRank = e => !isProblem(childOf(e)) ? 0 : isHandled(childOf(e)) ? 1 : 2;
 
                 // Boxes stay unfilled so an edge from an outer box can be followed
                 // across inner ones back to where it starts
-                content.append("g")
+                const boxRects = content.append("g")
                     .attr("fill", "none")
                     .attr("stroke", textColor)
                     .attr("stroke-opacity", 0.45)
@@ -965,6 +1015,13 @@
 
                 const titles = node.append("title");
 
+                // A ring around the dot for the worst service problem: solid for
+                // unhandled problems, dashed and faded if all are handled
+                const rings = node.append("circle")
+                    .attr("r", 8.5)
+                    .attr("fill", "none")
+                    .attr("stroke-width", 2);
+
                 const circles = node.append("circle")
                     .attr("r", 5)
                     .attr("stroke", d => d.synthetic ? "none" : textColor)
@@ -974,7 +1031,6 @@
                     .attr("x", -LABEL_OFFSET)
                     .attr("dy", "0.32em")
                     .attr("text-anchor", "end")
-                    .attr("opacity", d => d.synthetic ? 1 : 0.6)
                     .attr("font-weight", d => d.synthetic ? "bold" : "normal")
                     .attr("font-style", d => d.synthetic ? "normal" : "italic")
                     .attr("stroke", background || "none")
@@ -988,20 +1044,76 @@
                 const applyStates = () => {
                     titles.text(d => [
                         d.name,
-                        "state: " + stateName(d),
+                        "state: " + stateName(d)
+                            + (d.acknowledged ? ", acknowledged" : "")
+                            + (d.in_downtime ? ", in downtime" : ""),
+                        stateName(d) === "unreachable" ? "(down because a parent is down)" : null,
+                        servicesText(d.services),
                         d.zone ? "zone: " + d.zone : null,
                         d.synthetic ? null : "not in the synthetic host group"
                     ].filter(Boolean).join("\n"));
-                    circles.attr("fill", d => stateColor(d));
-                    labels.attr("fill", d => d.synthetic ? stateColor(d) : textColor);
+                    const ringState = d => d.services && (d.services.worst_unhandled
+                        || (d.services.worst !== "ok" ? d.services.worst : null));
+                    rings
+                        .attr("display", d => ringState(d) ? null : "none")
+                        .attr("stroke", d => COLOURS[ringState(d)] || "none")
+                        .attr("stroke-dasharray", d => d.services && !d.services.worst_unhandled ? "2,2" : null)
+                        .attr("stroke-opacity", d => d.services && !d.services.worst_unhandled ? 0.6 : 1);
+                    circles
+                        .attr("fill", d => stateColor(d))
+                        .attr("fill-opacity", d => isHandled(d) ? 0.45 : 1);
+                    labels
+                        .attr("fill", d => d.synthetic ? stateColor(d) : textColor)
+                        .attr("opacity", d => (d.synthetic ? 1 : 0.6) * (isHandled(d) ? 0.6 : 1));
                     edgePaths
-                        .attr("stroke", e => pointsAtRed(e) ? downRed : edgeBlue)
-                        .attr("stroke-opacity", e => pointsAtRed(e) ? 0.8 : 0.5)
-                        .attr("marker-end", e => pointsAtRed(e) ? "url(#clustergraph-arrow-down)" : "url(#clustergraph-arrow)")
-                        // Red arrows are drawn last so they stay on top where lines overlap
-                        .sort((a, b) => pointsAtRed(a) - pointsAtRed(b));
+                        .attr("stroke", arrowColour)
+                        .attr("opacity", arrowOpacity)
+                        .attr("marker-end", e => markerFor(arrowColour(e)))
+                        // Unhandled problems are drawn last so they stay on top
+                        .sort((a, b) => arrowRank(a) - arrowRank(b));
                 };
                 applyStates();
+
+                // Hovering a host highlights everything above and below it (and
+                // the arrows along those chains) and dims the rest
+                const parentsOf = new Map(nodes.map(n => [n.name, []]));
+                const childrenOf = new Map(nodes.map(n => [n.name, []]));
+                links.forEach(l => {
+                    if (!parentsOf.has(l.target) || !childrenOf.has(l.source)) return;
+                    parentsOf.get(l.target).push(l.source);
+                    childrenOf.get(l.source).push(l.target);
+                });
+                const reach = (start, next) => {
+                    const seen = new Set();
+                    const queue = [start];
+                    while (queue.length) {
+                        next.get(queue.shift()).forEach(n => {
+                            if (!seen.has(n)) {
+                                seen.add(n);
+                                queue.push(n);
+                            }
+                        });
+                    }
+                    return seen;
+                };
+                const highlight = name => {
+                    const above = reach(name, parentsOf);
+                    const below = reach(name, childrenOf);
+                    const related = new Set([name, ...above, ...below]);
+                    const onChain = e => e.parents.some(p =>
+                        (above.has(p) && (e.child === name || above.has(e.child)))
+                        || ((p === name || below.has(p)) && below.has(e.child)));
+                    node.style("opacity", d => related.has(d.name) ? null : 0.15);
+                    boxRects.style("opacity", b => b.names.some(n => related.has(n)) ? null : 0.15);
+                    edgePaths.style("opacity", e => onChain(e) ? 1 : 0.06);
+                };
+                const clearHighlight = () => {
+                    node.style("opacity", null);
+                    boxRects.style("opacity", null);
+                    edgePaths.style("opacity", null);
+                };
+                node.on("mouseenter.highlight", (event, d) => highlight(d.name))
+                    .on("mouseleave.highlight", clearHighlight);
 
                 drawn = {
                     structure: structureOf(data),
@@ -1012,6 +1124,10 @@
                             shown.state = n.state;
                             shown.last_check = n.last_check;
                             shown.zone = n.zone;
+                            shown.reachable = n.reachable;
+                            shown.acknowledged = n.acknowledged;
+                            shown.in_downtime = n.in_downtime;
+                            shown.services = n.services;
                         });
                         applyStates();
                     }
@@ -1160,6 +1276,44 @@
             const status = document.createElement("span");
             hint.append(status, "Scroll to zoom \u00b7 Drag or Shift + scroll to move");
             viewport.append(hint);
+
+            // Legend for the colours, bottom left
+            const legend = document.createElement("div");
+            legend.className = "clustergraph-legend";
+            const swatch = (fill, opts = {}) => {
+                const ns = "http://www.w3.org/2000/svg";
+                const icon = document.createElementNS(ns, "svg");
+                icon.setAttribute("width", "20");
+                icon.setAttribute("height", "12");
+                icon.setAttribute("viewBox", "-10 -6 20 12");
+                if (opts.ring) {
+                    const ring = document.createElementNS(ns, "circle");
+                    ring.setAttribute("r", "5");
+                    ring.setAttribute("fill", "none");
+                    ring.setAttribute("stroke", opts.ring);
+                    ring.setAttribute("stroke-width", "1.5");
+                    icon.append(ring);
+                }
+                const dot = document.createElementNS(ns, "circle");
+                dot.setAttribute("r", opts.ring ? "2.5" : "4");
+                dot.setAttribute("fill", fill);
+                if (opts.faded) dot.setAttribute("fill-opacity", "0.45");
+                icon.append(dot);
+                return icon;
+            };
+            [
+                [swatch(COLOURS.up), "up"],
+                [swatch(COLOURS.down), "down"],
+                [swatch(COLOURS.unreachable), "unreachable (parent down)"],
+                [swatch(COLOURS.down, {faded: true}), "acknowledged / downtime"],
+                [swatch(COLOURS.pending), "pending"],
+                [swatch(COLOURS.up, {ring: COLOURS.warning}), "service problem"]
+            ].forEach(([icon, text]) => {
+                const item = document.createElement("span");
+                item.append(icon, text);
+                legend.append(item);
+            });
+            viewport.append(legend);
 
             // --- Sizing ----------------------------------------------------------
 
