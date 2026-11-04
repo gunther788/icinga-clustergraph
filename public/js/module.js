@@ -480,11 +480,13 @@
                 }
             }
 
-            // The diagram sits in a viewport that can be zoomed and panned. The
-            // viewport is as tall as the diagram at 100%, up to 75% of the window.
+            // The diagram sits in a viewport that can be zoomed and panned, and
+            // that fills the browser window from where it starts down to the
+            // bottom (see addZoom). Its background matches the page so it also
+            // looks right in full screen.
             const viewport = document.createElement("div");
             viewport.className = "clustergraph-viewport";
-            viewport.style.height = `min(${Math.ceil(height)}px, 75vh)`;
+            if (background) viewport.style.backgroundColor = background;
 
             const svg = d3.select(viewport).append("svg")
                 .attr("width", "100%")
@@ -594,8 +596,11 @@
          * - drag to move, pinch or Ctrl/Cmd + scroll to zoom
          * - plain scrolling moves the diagram while it has somewhere to go, and
          *   otherwise scrolls the page as usual
-         * - buttons to zoom in, zoom out, fit the whole diagram and show 100%
-         * It starts fitted, and keeps refitting on resize until the user zooms or pans.
+         * - buttons to zoom in, zoom out, fit the whole diagram, show 100% and
+         *   toggle full screen
+         * The viewport fills the window below its top edge and follows window
+         * resizes. It starts fitted, refits on resize until the user zooms or
+         * pans, and always refits when entering or leaving full screen.
          */
         addZoom: function (viewport, svg, zoomLayer, width, height) {
             const margin = 40;
@@ -647,8 +652,64 @@
                 userMoved = false;
             };
 
+            const isFullscreen = () =>
+                (document.fullscreenElement || document.webkitFullscreenElement) === viewport;
+            const canFullscreen = !!(viewport.requestFullscreen || viewport.webkitRequestFullscreen);
+            const toggleFullscreen = () => {
+                if (isFullscreen()) {
+                    (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+                } else {
+                    (viewport.requestFullscreen || viewport.webkitRequestFullscreen).call(viewport);
+                }
+            };
+
+            // Fill the window from the viewport's top edge down to the bottom.
+            // If the page would still scroll (padding and margins below us), take
+            // that much off so the whole working area is visible at once.
+            const scroller = () => {
+                for (let el = viewport.parentElement; el && el !== document.body; el = el.parentElement) {
+                    if (/(auto|scroll)/.test(getComputedStyle(el).overflowY)) return el;
+                }
+                return document.scrollingElement || document.documentElement;
+            };
+            const sizeToWindow = () => {
+                if (isFullscreen()) {
+                    viewport.style.height = "100vh";
+                    return;
+                }
+                const top = viewport.getBoundingClientRect().top;
+                viewport.style.height = Math.max(200, window.innerHeight - top) + "px";
+                const outer = scroller();
+                const excess = outer.scrollHeight - outer.clientHeight;
+                if (excess > 0) {
+                    viewport.style.height = Math.max(200, viewport.clientHeight - excess) + "px";
+                }
+            };
+            const onWindowResize = () => {
+                // Icinga replaces the diagram on refresh; drop listeners of old ones
+                if (!viewport.isConnected) {
+                    window.removeEventListener("resize", onWindowResize);
+                    return;
+                }
+                sizeToWindow();
+            };
+            window.addEventListener("resize", onWindowResize);
+            const onFullscreenChange = () => {
+                if (!viewport.isConnected) {
+                    document.removeEventListener("fullscreenchange", onFullscreenChange);
+                    document.removeEventListener("webkitfullscreenchange", onFullscreenChange);
+                    return;
+                }
+                sizeToWindow();
+                fullscreenButton && (fullscreenButton.textContent = isFullscreen() ? "Exit full screen" : "Full screen");
+                requestAnimationFrame(() => fit(false));
+            };
+            document.addEventListener("fullscreenchange", onFullscreenChange);
+            document.addEventListener("webkitfullscreenchange", onFullscreenChange);
+
             const controls = document.createElement("div");
             controls.className = "clustergraph-controls";
+            let fullscreenButton = null;
             [
                 ["+", "Zoom in", () => svg.transition().duration(200).call(zoom.scaleBy, 1.4)],
                 ["\u2212", "Zoom out", () => svg.transition().duration(200).call(zoom.scaleBy, 1 / 1.4)],
@@ -656,8 +717,9 @@
                 ["1:1", "Show at 100%", () => {
                     const t = d3.zoomTransform(svg.node());
                     svg.transition().duration(250).call(zoom.scaleBy, 1 / t.k);
-                }]
-            ].forEach(([label, title, action]) => {
+                }],
+                canFullscreen ? ["Full screen", "Toggle full screen (Esc to leave)", toggleFullscreen] : null
+            ].filter(Boolean).forEach(([label, title, action]) => {
                 const button = document.createElement("button");
                 button.type = "button";
                 button.textContent = label;
@@ -668,6 +730,7 @@
                     action();
                 });
                 controls.append(button);
+                if (action === toggleFullscreen) fullscreenButton = button;
             });
             viewport.append(controls);
 
@@ -676,8 +739,12 @@
             hint.textContent = "Drag to move \u00b7 Ctrl/\u2318 + scroll or pinch to zoom";
             viewport.append(hint);
 
-            // Fit once the viewport has a size, and again on resize until the
-            // user takes over
+            // Size to the window once the viewport is on the page, then fit; refit
+            // on resize until the user takes over
+            requestAnimationFrame(() => {
+                sizeToWindow();
+                fit(false);
+            });
             if (window.ResizeObserver) {
                 new ResizeObserver(() => { if (!userMoved) fit(false); }).observe(viewport);
             } else {
