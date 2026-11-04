@@ -1,0 +1,812 @@
+{
+ "nodes": [
+  {
+   "name": "db-a",
+   "label": "db-a",
+   "state": 1,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#db-a"
+  },
+  {
+   "name": "db-b",
+   "label": "db-b",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#db-b"
+  },
+  {
+   "name": "db-c",
+   "label": "db-c",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#db-c"
+  },
+  {
+   "name": "queue",
+   "label": "queue",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#queue"
+  },
+  {
+   "name": "cache",
+   "label": "cache",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#cache"
+  },
+  {
+   "name": "svc-auth",
+   "label": "svc-auth",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#svc-auth"
+  },
+  {
+   "name": "svc-pay",
+   "label": "svc-pay",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#svc-pay"
+  },
+  {
+   "name": "svc-search",
+   "label": "svc-search",
+   "state": 1,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#svc-search"
+  },
+  {
+   "name": "svc-mail",
+   "label": "svc-mail",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#svc-mail"
+  },
+  {
+   "name": "svc-cart",
+   "label": "svc-cart",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#svc-cart"
+  },
+  {
+   "name": "svc-feed",
+   "label": "svc-feed",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#svc-feed"
+  },
+  {
+   "name": "edge-syd",
+   "label": "edge-syd",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#edge-syd"
+  },
+  {
+   "name": "edge-mel",
+   "label": "edge-mel",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#edge-mel"
+  },
+  {
+   "name": "edge-lon",
+   "label": "edge-lon",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#edge-lon"
+  },
+  {
+   "name": "edge-nyc",
+   "label": "edge-nyc",
+   "state": 1,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#edge-nyc"
+  },
+  {
+   "name": "edge-sin",
+   "label": "edge-sin",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#edge-sin"
+  },
+  {
+   "name": "edge-fra",
+   "label": "edge-fra",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#edge-fra"
+  },
+  {
+   "name": "edge-tok",
+   "label": "edge-tok",
+   "state": 1,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#edge-tok"
+  },
+  {
+   "name": "probe-100",
+   "label": "probe-100",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-100"
+  },
+  {
+   "name": "probe-101",
+   "label": "probe-101",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-101"
+  },
+  {
+   "name": "probe-102",
+   "label": "probe-102",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-102"
+  },
+  {
+   "name": "probe-103",
+   "label": "probe-103",
+   "state": 1,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-103"
+  },
+  {
+   "name": "probe-104",
+   "label": "probe-104",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-104"
+  },
+  {
+   "name": "probe-105",
+   "label": "probe-105",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-105"
+  },
+  {
+   "name": "probe-106",
+   "label": "probe-106",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-106"
+  },
+  {
+   "name": "probe-107",
+   "label": "probe-107",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-107"
+  },
+  {
+   "name": "probe-108",
+   "label": "probe-108",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-108"
+  },
+  {
+   "name": "probe-109",
+   "label": "probe-109",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-109"
+  },
+  {
+   "name": "probe-110",
+   "label": "probe-110",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-110"
+  },
+  {
+   "name": "probe-111",
+   "label": "probe-111",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-111"
+  },
+  {
+   "name": "probe-112",
+   "label": "probe-112",
+   "state": 1,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-112"
+  },
+  {
+   "name": "probe-113",
+   "label": "probe-113",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-113"
+  },
+  {
+   "name": "probe-114",
+   "label": "probe-114",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-114"
+  },
+  {
+   "name": "probe-115",
+   "label": "probe-115",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-115"
+  },
+  {
+   "name": "probe-116",
+   "label": "probe-116",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-116"
+  },
+  {
+   "name": "probe-117",
+   "label": "probe-117",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-117"
+  },
+  {
+   "name": "probe-118",
+   "label": "probe-118",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-118"
+  },
+  {
+   "name": "probe-119",
+   "label": "probe-119",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-119"
+  },
+  {
+   "name": "probe-120",
+   "label": "probe-120",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-120"
+  },
+  {
+   "name": "probe-121",
+   "label": "probe-121",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-121"
+  },
+  {
+   "name": "probe-122",
+   "label": "probe-122",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-122"
+  },
+  {
+   "name": "probe-123",
+   "label": "probe-123",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-123"
+  },
+  {
+   "name": "probe-124",
+   "label": "probe-124",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-124"
+  },
+  {
+   "name": "probe-125",
+   "label": "probe-125",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-125"
+  },
+  {
+   "name": "probe-126",
+   "label": "probe-126",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-126"
+  },
+  {
+   "name": "probe-127",
+   "label": "probe-127",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-127"
+  },
+  {
+   "name": "probe-128",
+   "label": "probe-128",
+   "state": 1,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-128"
+  },
+  {
+   "name": "probe-129",
+   "label": "probe-129",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-129"
+  },
+  {
+   "name": "probe-130",
+   "label": "probe-130",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-130"
+  },
+  {
+   "name": "probe-131",
+   "label": "probe-131",
+   "state": 1,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-131"
+  },
+  {
+   "name": "probe-132",
+   "label": "probe-132",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-132"
+  },
+  {
+   "name": "probe-133",
+   "label": "probe-133",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-133"
+  },
+  {
+   "name": "probe-134",
+   "label": "probe-134",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-134"
+  },
+  {
+   "name": "probe-135",
+   "label": "probe-135",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-135"
+  },
+  {
+   "name": "probe-136",
+   "label": "probe-136",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-136"
+  },
+  {
+   "name": "probe-137",
+   "label": "probe-137",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-137"
+  },
+  {
+   "name": "probe-138",
+   "label": "probe-138",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-138"
+  },
+  {
+   "name": "probe-139",
+   "label": "probe-139",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#probe-139"
+  },
+  {
+   "name": "idle-0",
+   "label": "idle-0",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#idle-0"
+  },
+  {
+   "name": "idle-1",
+   "label": "idle-1",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#idle-1"
+  },
+  {
+   "name": "idle-2",
+   "label": "idle-2",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#idle-2"
+  },
+  {
+   "name": "idle-3",
+   "label": "idle-3",
+   "state": 0,
+   "last_check": 1,
+   "zone": "z",
+   "synthetic": true,
+   "link": "#idle-3"
+  }
+ ],
+ "links": [
+  {
+   "source": "svc-auth",
+   "target": "queue"
+  },
+  {
+   "source": "svc-auth",
+   "target": "cache"
+  },
+  {
+   "source": "svc-pay",
+   "target": "cache"
+  },
+  {
+   "source": "svc-pay",
+   "target": "db-c"
+  },
+  {
+   "source": "svc-search",
+   "target": "cache"
+  },
+  {
+   "source": "svc-mail",
+   "target": "queue"
+  },
+  {
+   "source": "svc-cart",
+   "target": "cache"
+  },
+  {
+   "source": "svc-feed",
+   "target": "db-b"
+  },
+  {
+   "source": "svc-feed",
+   "target": "cache"
+  },
+  {
+   "source": "edge-syd",
+   "target": "svc-pay"
+  },
+  {
+   "source": "edge-mel",
+   "target": "svc-pay"
+  },
+  {
+   "source": "edge-lon",
+   "target": "svc-cart"
+  },
+  {
+   "source": "edge-lon",
+   "target": "db-b"
+  },
+  {
+   "source": "edge-nyc",
+   "target": "svc-mail"
+  },
+  {
+   "source": "edge-nyc",
+   "target": "svc-search"
+  },
+  {
+   "source": "edge-nyc",
+   "target": "cache"
+  },
+  {
+   "source": "edge-sin",
+   "target": "svc-auth"
+  },
+  {
+   "source": "edge-sin",
+   "target": "svc-search"
+  },
+  {
+   "source": "edge-fra",
+   "target": "svc-feed"
+  },
+  {
+   "source": "edge-fra",
+   "target": "svc-auth"
+  },
+  {
+   "source": "edge-tok",
+   "target": "svc-pay"
+  },
+  {
+   "source": "edge-tok",
+   "target": "svc-search"
+  },
+  {
+   "source": "probe-100",
+   "target": "edge-mel"
+  },
+  {
+   "source": "probe-101",
+   "target": "edge-nyc"
+  },
+  {
+   "source": "probe-102",
+   "target": "edge-mel"
+  },
+  {
+   "source": "probe-103",
+   "target": "edge-lon"
+  },
+  {
+   "source": "probe-104",
+   "target": "edge-lon"
+  },
+  {
+   "source": "probe-105",
+   "target": "edge-nyc"
+  },
+  {
+   "source": "probe-106",
+   "target": "edge-mel"
+  },
+  {
+   "source": "probe-107",
+   "target": "edge-lon"
+  },
+  {
+   "source": "probe-108",
+   "target": "edge-lon"
+  },
+  {
+   "source": "probe-109",
+   "target": "edge-mel"
+  },
+  {
+   "source": "probe-110",
+   "target": "edge-nyc"
+  },
+  {
+   "source": "probe-111",
+   "target": "edge-nyc"
+  },
+  {
+   "source": "probe-112",
+   "target": "edge-lon"
+  },
+  {
+   "source": "probe-113",
+   "target": "edge-mel"
+  },
+  {
+   "source": "probe-114",
+   "target": "edge-lon"
+  },
+  {
+   "source": "probe-115",
+   "target": "edge-lon"
+  },
+  {
+   "source": "probe-116",
+   "target": "edge-sin"
+  },
+  {
+   "source": "probe-117",
+   "target": "edge-mel"
+  },
+  {
+   "source": "probe-118",
+   "target": "edge-nyc"
+  },
+  {
+   "source": "probe-119",
+   "target": "edge-lon"
+  },
+  {
+   "source": "probe-120",
+   "target": "edge-nyc"
+  },
+  {
+   "source": "probe-121",
+   "target": "edge-mel"
+  },
+  {
+   "source": "probe-122",
+   "target": "edge-sin"
+  },
+  {
+   "source": "probe-123",
+   "target": "edge-nyc"
+  },
+  {
+   "source": "probe-124",
+   "target": "edge-nyc"
+  },
+  {
+   "source": "probe-125",
+   "target": "edge-nyc"
+  },
+  {
+   "source": "probe-126",
+   "target": "edge-mel"
+  },
+  {
+   "source": "probe-127",
+   "target": "edge-nyc"
+  },
+  {
+   "source": "probe-128",
+   "target": "edge-mel"
+  },
+  {
+   "source": "probe-129",
+   "target": "edge-mel"
+  },
+  {
+   "source": "probe-130",
+   "target": "edge-lon"
+  },
+  {
+   "source": "probe-131",
+   "target": "edge-lon"
+  },
+  {
+   "source": "probe-132",
+   "target": "edge-lon"
+  },
+  {
+   "source": "probe-133",
+   "target": "edge-mel"
+  },
+  {
+   "source": "probe-134",
+   "target": "edge-nyc"
+  },
+  {
+   "source": "probe-135",
+   "target": "edge-lon"
+  },
+  {
+   "source": "probe-136",
+   "target": "edge-nyc"
+  },
+  {
+   "source": "probe-137",
+   "target": "edge-lon"
+  },
+  {
+   "source": "probe-138",
+   "target": "edge-sin"
+  },
+  {
+   "source": "probe-139",
+   "target": "edge-mel"
+  }
+ ]
+}

@@ -1,0 +1,388 @@
+{
+ "nodes": [
+  {
+   "name": "db-1",
+   "label": "db-1",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#db-1"
+  },
+  {
+   "name": "db-2",
+   "label": "db-2",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#db-2"
+  },
+  {
+   "name": "cache-1",
+   "label": "cache-1",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#cache-1"
+  },
+  {
+   "name": "web-1",
+   "label": "web-1",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#web-1"
+  },
+  {
+   "name": "web-2",
+   "label": "web-2",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#web-2"
+  },
+  {
+   "name": "api-1",
+   "label": "api-1",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#api-1"
+  },
+  {
+   "name": "api-2",
+   "label": "api-2",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#api-2"
+  },
+  {
+   "name": "probe-syd",
+   "label": "probe-syd",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#probe-syd"
+  },
+  {
+   "name": "probe-mel",
+   "label": "probe-mel",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#probe-mel"
+  },
+  {
+   "name": "probe-bne",
+   "label": "probe-bne",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#probe-bne"
+  },
+  {
+   "name": "probe-per",
+   "label": "probe-per",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#probe-per"
+  },
+  {
+   "name": "probe-akl",
+   "label": "probe-akl",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#probe-akl"
+  },
+  {
+   "name": "probe-sin",
+   "label": "probe-sin",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#probe-sin"
+  },
+  {
+   "name": "probe-lon",
+   "label": "probe-lon",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#probe-lon"
+  },
+  {
+   "name": "probe-nyc",
+   "label": "probe-nyc",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#probe-nyc"
+  },
+  {
+   "name": "probe-sfo",
+   "label": "probe-sfo",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#probe-sfo"
+  },
+  {
+   "name": "probe-fra",
+   "label": "probe-fra",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#probe-fra"
+  },
+  {
+   "name": "probe-tok",
+   "label": "probe-tok",
+   "state": 1,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#probe-tok"
+  },
+  {
+   "name": "probe-hkg",
+   "label": "probe-hkg",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#probe-hkg"
+  },
+  {
+   "name": "probe-dub",
+   "label": "probe-dub",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#probe-dub"
+  },
+  {
+   "name": "probe-ams",
+   "label": "probe-ams",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#probe-ams"
+  },
+  {
+   "name": "checker-a",
+   "label": "checker-a",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#checker-a"
+  },
+  {
+   "name": "checker-b",
+   "label": "checker-b",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#checker-b"
+  },
+  {
+   "name": "checker-c",
+   "label": "checker-c",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#checker-c"
+  },
+  {
+   "name": "lonely-1",
+   "label": "lonely-1",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#lonely-1"
+  },
+  {
+   "name": "lonely-2",
+   "label": "lonely-2",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#lonely-2"
+  },
+  {
+   "name": "lonely-3",
+   "label": "lonely-3",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#lonely-3"
+  },
+  {
+   "name": "lonely-4",
+   "label": "lonely-4",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#lonely-4"
+  },
+  {
+   "name": "lonely-5",
+   "label": "lonely-5",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": true,
+   "link": "#lonely-5"
+  },
+  {
+   "name": "core-router",
+   "label": "core-router",
+   "state": 0,
+   "last_check": 1,
+   "zone": "master",
+   "synthetic": false,
+   "link": "#core-router"
+  }
+ ],
+ "links": [
+  {
+   "source": "web-1",
+   "target": "db-1"
+  },
+  {
+   "source": "api-1",
+   "target": "db-1"
+  },
+  {
+   "source": "api-2",
+   "target": "db-2"
+  },
+  {
+   "source": "web-2",
+   "target": "cache-1"
+  },
+  {
+   "source": "probe-syd",
+   "target": "web-1"
+  },
+  {
+   "source": "probe-syd",
+   "target": "web-2"
+  },
+  {
+   "source": "probe-mel",
+   "target": "web-1"
+  },
+  {
+   "source": "probe-mel",
+   "target": "web-2"
+  },
+  {
+   "source": "probe-bne",
+   "target": "web-1"
+  },
+  {
+   "source": "probe-bne",
+   "target": "web-2"
+  },
+  {
+   "source": "probe-per",
+   "target": "web-1"
+  },
+  {
+   "source": "probe-per",
+   "target": "web-2"
+  },
+  {
+   "source": "probe-akl",
+   "target": "api-1"
+  },
+  {
+   "source": "probe-sin",
+   "target": "api-1"
+  },
+  {
+   "source": "probe-lon",
+   "target": "api-1"
+  },
+  {
+   "source": "probe-nyc",
+   "target": "api-1"
+  },
+  {
+   "source": "probe-sfo",
+   "target": "api-1"
+  },
+  {
+   "source": "probe-fra",
+   "target": "api-2"
+  },
+  {
+   "source": "probe-tok",
+   "target": "api-2"
+  },
+  {
+   "source": "probe-hkg",
+   "target": "api-2"
+  },
+  {
+   "source": "probe-dub",
+   "target": "api-2"
+  },
+  {
+   "source": "probe-dub",
+   "target": "web-1"
+  },
+  {
+   "source": "probe-ams",
+   "target": "api-2"
+  },
+  {
+   "source": "probe-ams",
+   "target": "web-1"
+  },
+  {
+   "source": "checker-a",
+   "target": "db-2"
+  },
+  {
+   "source": "checker-b",
+   "target": "db-2"
+  },
+  {
+   "source": "checker-c",
+   "target": "db-2"
+  },
+  {
+   "source": "core-router",
+   "target": "probe-syd"
+  }
+ ]
+}
