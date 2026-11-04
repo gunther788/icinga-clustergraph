@@ -123,59 +123,127 @@
 
             const {columns, layer, position, layerCount} = layout(nodes, links);
 
-            const rowHeight = 30;
-            const padding = 20;
-            const labelOffset = 12; // circle centre to the end of its label (labels sit left of the dot)
-            const columnGap = 110;  // space left for the edges between columns
-            const maxRows = Math.max(...columns.map(c => c.length));
+            const fontSize = 11;    // about 80% of the original 14px
+            const rowHeight = 24;
+            const padding = 16;
+            const labelOffset = 10; // circle centre to the end of its label (labels sit left of the dot)
+            const columnGap = 90;   // space for the edges between dependency levels
+            const subColumnGap = 40; // space between the wrapped parts of the rightmost column
 
             // Measure labels so each column leaves room for its text
             const ctx = document.createElement("canvas").getContext("2d");
             const labelWidth = new Map(nodes.map(n => {
-                ctx.font = (n.synthetic ? "bold" : "italic") + " 14px sans-serif";
+                ctx.font = (n.synthetic ? "bold" : "italic") + " " + fontSize + "px sans-serif";
                 return [n.name, ctx.measureText(n.label).width];
             }));
 
-            // Children on the left, parents on the right: lay columns out from the
-            // deepest layer to layer 0. Each column is as wide as its longest label
-            // (drawn left of the dot) plus the gap for edges.
-            const columnX = new Array(layerCount);
-            let x = padding;
-            for (let col = layerCount - 1; col >= 0; col--) {
-                x += Math.max(0, ...columns[col].map(name => labelWidth.get(name))) + labelOffset;
-                columnX[col] = x;
-                x += columnGap;
+            // A slot is one drawn column: a list of {name, row} plus its height in rows.
+            // Children on the left, parents on the right, so slots run from the
+            // deepest layer to layer 0.
+            const slots = [];
+            for (let col = layerCount - 1; col >= 1; col--) {
+                slots.push({
+                    items: columns[col].map(name => ({name, row: position.get(name)})),
+                    height: columns[col].length,
+                    gapAfter: columnGap
+                });
             }
 
-            // Centre each column vertically against the tallest one
-            const point = name => {
-                const col = layer.get(name);
-                const offset = (maxRows - columns[col].length) * rowHeight / 2;
-                return {
-                    x: columnX[col],
-                    y: padding + offset + position.get(name) * rowHeight
-                };
-            };
+            // The rightmost column (hosts with no parents) is usually by far the
+            // tallest, so wrap it into several side-by-side sub-columns. Hosts that
+            // are parents of the same children are kept together as a group, with
+            // a blank row between groups; hosts with no children go last.
+            const childrenOf = new Map(nodes.map(n => [n.name, []]));
+            links.forEach(l => {
+                if (childrenOf.has(l.source)) childrenOf.get(l.source).push(l.target);
+            });
+            const groups = new Map();
+            columns[0].forEach(name => {
+                const key = childrenOf.get(name).slice().sort().join("\0");
+                if (!groups.has(key)) groups.set(key, []);
+                groups.get(key).push(name);
+            });
+            const orderedGroups = [...groups.entries()]
+                .sort((a, b) => (a[0] === "") - (b[0] === ""))
+                .map(entry => entry[1]);
+
+            const otherMax = Math.max(0, ...slots.map(slot => slot.height));
+            const target = layerCount > 1
+                ? Math.max(otherMax, 8)
+                : Math.max(8, Math.ceil(columns[0].length / 4));
+
+            const wrapped = [];
+            let current = {items: [], height: 0, gapAfter: subColumnGap};
+            orderedGroups.forEach(group => {
+                if (current.items.length && current.height + 1 + group.length > target) {
+                    wrapped.push(current);
+                    current = {items: [], height: 0, gapAfter: subColumnGap};
+                }
+                if (current.items.length) current.height += 1; // blank row between groups
+                group.forEach(name => {
+                    if (current.height >= target) { // a single group taller than the target
+                        wrapped.push(current);
+                        current = {items: [], height: 0, gapAfter: subColumnGap};
+                    }
+                    current.items.push({name, row: current.height++});
+                });
+            });
+            if (current.items.length) wrapped.push(current);
+            slots.push(...wrapped);
+
+            // Horizontal placement: each slot is as wide as its longest label
+            // (drawn left of the dot) plus the gap that follows it.
+            let x = padding;
+            slots.forEach(slot => {
+                x += Math.max(0, ...slot.items.map(item => labelWidth.get(item.name))) + labelOffset;
+                slot.x = x;
+                x += slot.gapAfter;
+            });
+            const lastGap = slots.length ? slots[slots.length - 1].gapAfter : 0;
+
+            // Centre each slot vertically against the tallest one
+            const maxRows = Math.max(1, ...slots.map(slot => slot.height));
+            const coords = new Map();
+            slots.forEach(slot => {
+                const offset = (maxRows - slot.height) * rowHeight / 2;
+                slot.items.forEach(item => coords.set(item.name, {
+                    x: slot.x,
+                    y: padding + offset + item.row * rowHeight
+                }));
+            });
+            const point = name => coords.get(name);
+
             // Edges leave from the far (left) end of the parent's label and run left
-            // into the child's dot from the right, so they never cross a label.
+            // into the child's dot from the right.
             const edgeStart = name => {
                 const p = point(name);
-                return {x: p.x - labelOffset - labelWidth.get(name) - 6, y: p.y};
+                return {x: p.x - labelOffset - labelWidth.get(name) - 5, y: p.y};
             };
 
-            const width = x - columnGap + padding;
-            const height = padding * 2 + (maxRows - 1) * rowHeight + 10;
+            const width = x - lastGap + padding;
+            const height = padding * 2 + (maxRows - 1) * rowHeight + 8;
+
+            // Edges from the outer sub-columns pass behind inner labels, so outline
+            // the text in the page background colour to keep it readable.
+            let background = null;
+            for (let el = document.getElementById("clustergraph-container"); el; el = el.parentElement) {
+                const bg = getComputedStyle(el).backgroundColor;
+                if (bg && bg !== "transparent" && !/rgba\(.*,\s*0\)$/.test(bg)) {
+                    background = bg;
+                    break;
+                }
+            }
 
             const svg = d3.create("svg")
                 .attr("width", width)
                 .attr("height", height)
                 .attr("viewBox", [0, 0, width, height])
-                .attr("style", "max-width: 100%; height: auto; font: 14px sans-serif;");
+                .attr("style", "max-width: 100%; height: auto; font: " + fontSize + "px sans-serif;");
 
             svg.append("defs").append("marker")
                 .attr("id", "clustergraph-arrow")
                 .attr("viewBox", "0 -5 10 10")
-                .attr("refX", 14)
+                .attr("refX", 13)
                 .attr("refY", 0)
                 .attr("markerWidth", 6)
                 .attr("markerHeight", 6)
@@ -191,7 +259,7 @@
                 .attr("fill", "none")
                 .attr("stroke", "#00c3ed")
                 .attr("stroke-opacity", 0.5)
-                .attr("stroke-width", 2)
+                .attr("stroke-width", 1.6)
                 .selectAll("path")
                 .data(drawnLinks)
                 .join("path")
@@ -221,7 +289,7 @@
                 ].filter(Boolean).join("\n"));
 
             node.append("circle")
-                .attr("r", 6)
+                .attr("r", 5)
                 .attr("fill", d => stateColor(d))
                 .attr("stroke", d => d.synthetic ? "none" : textColor)
                 .attr("stroke-dasharray", "2,2");
@@ -234,6 +302,10 @@
                 .attr("opacity", d => d.synthetic ? 1 : 0.6)
                 .attr("font-weight", d => d.synthetic ? "bold" : "normal")
                 .attr("font-style", d => d.synthetic ? "normal" : "italic")
+                .attr("stroke", background || "none")
+                .attr("stroke-width", 3)
+                .attr("stroke-linejoin", "round")
+                .attr("paint-order", "stroke")
                 .text(d => d.label);
 
             return svg.node();
