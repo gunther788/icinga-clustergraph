@@ -165,26 +165,36 @@
             });
             const orderedGroups = [...groups.entries()]
                 .sort((a, b) => (a[0] === "") - (b[0] === ""))
-                .map(entry => entry[1]);
+                .map(([key, names]) => ({names, children: key === "" ? [] : key.split("\0")}));
 
             const otherMax = Math.max(0, ...slots.map(slot => slot.height));
             const target = layerCount > 1
                 ? Math.max(otherMax, 8)
                 : Math.max(8, Math.ceil(columns[0].length / 4));
 
+            // Each group is drawn as a rounded box with its arrows leaving from the
+            // box. A group taller than the target is split, one box per piece.
             const wrapped = [];
+            const boxes = [];
             let current = {items: [], height: 0, gapAfter: subColumnGap};
             orderedGroups.forEach(group => {
-                if (current.items.length && current.height + 1 + group.length > target) {
+                if (current.items.length && current.height + 1 + group.names.length > target) {
                     wrapped.push(current);
                     current = {items: [], height: 0, gapAfter: subColumnGap};
                 }
                 if (current.items.length) current.height += 1; // blank row between groups
-                group.forEach(name => {
+                let box = null;
+                group.names.forEach(name => {
                     if (current.height >= target) { // a single group taller than the target
                         wrapped.push(current);
                         current = {items: [], height: 0, gapAfter: subColumnGap};
+                        box = null;
                     }
+                    if (!box) {
+                        box = {slot: current, names: [], children: group.children};
+                        boxes.push(box);
+                    }
+                    box.names.push(name);
                     current.items.push({name, row: current.height++});
                 });
             });
@@ -213,6 +223,18 @@
             });
             const point = name => coords.get(name);
 
+            // Box geometry: wraps the labels (left of the dots) and the dots, with
+            // half a row above and below so neighbouring boxes keep a clear gap.
+            const boxPadX = 6;
+            boxes.forEach(box => {
+                const ys = box.names.map(name => point(name).y);
+                const widest = Math.max(...box.names.map(name => labelWidth.get(name)));
+                box.x0 = box.slot.x - labelOffset - widest - boxPadX;
+                box.x1 = box.slot.x + 5 + boxPadX;
+                box.y0 = Math.min(...ys) - rowHeight / 2 + 2;
+                box.y1 = Math.max(...ys) + rowHeight / 2 - 2;
+            });
+
             // Edges leave from the far (left) end of the parent's label and run left
             // into the child's dot from the right.
             const edgeStart = name => {
@@ -220,7 +242,7 @@
                 return {x: p.x - labelOffset - labelWidth.get(name) - 5, y: p.y};
             };
 
-            const width = x - lastGap + padding;
+            const width = x - lastGap + padding + 5 + boxPadX;
             const height = padding * 2 + (maxRows - 1) * rowHeight + 8;
 
             // Edges from the outer sub-columns pass behind inner labels, so outline
@@ -253,7 +275,35 @@
                 .attr("fill", "#00c3ed");
 
             const nodeNames = new Set(nodes.map(n => n.name));
-            const drawnLinks = links.filter(l => nodeNames.has(l.source) && nodeNames.has(l.target));
+            const boxed = new Set(columns[0]);
+
+            // Hosts in the rightmost level don't get their own edges; their box does.
+            const drawnLinks = links
+                .filter(l => nodeNames.has(l.source) && nodeNames.has(l.target) && !boxed.has(l.source))
+                .map(l => ({source: edgeStart(l.source), target: point(l.target)}));
+            boxes.forEach(box => {
+                const start = {x: box.x0, y: (box.y0 + box.y1) / 2};
+                box.children
+                    .filter(child => nodeNames.has(child))
+                    .forEach(child => drawnLinks.push({source: start, target: point(child)}));
+            });
+
+            // Boxes stay unfilled so an edge from an outer box can be followed
+            // across inner ones back to where it starts.
+            svg.append("g")
+                .attr("fill", "none")
+                .attr("stroke", textColor)
+                .attr("stroke-opacity", 0.45)
+                .attr("stroke-width", 1.2)
+                .selectAll("rect")
+                .data(boxes)
+                .join("rect")
+                .attr("x", b => b.x0)
+                .attr("y", b => b.y0)
+                .attr("width", b => b.x1 - b.x0)
+                .attr("height", b => b.y1 - b.y0)
+                .attr("rx", 7)
+                .attr("ry", 7);
 
             svg.append("g")
                 .attr("fill", "none")
@@ -265,8 +315,6 @@
                 .join("path")
                 .attr("marker-end", "url(#clustergraph-arrow)")
                 .attr("d", d3.linkHorizontal()
-                    .source(l => edgeStart(l.source))
-                    .target(l => point(l.target))
                     .x(p => p.x)
                     .y(p => p.y));
 
