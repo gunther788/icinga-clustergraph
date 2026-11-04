@@ -4,9 +4,9 @@
  * Tiny assertion helper shared by the PHP tests (no framework needed).
  */
 
-require_once __DIR__ . '/../../library/Clustergraph/Common/GraphBuilder.php';
-require_once __DIR__ . '/../../library/Clustergraph/Common/GraphSource.php';
-require_once __DIR__ . '/../../library/Clustergraph/Common/JsonCache.php';
+require_once __DIR__ . '/../../library/Topologygraph/Common/GraphBuilder.php';
+require_once __DIR__ . '/../../library/Topologygraph/Common/GraphSource.php';
+require_once __DIR__ . '/../../library/Topologygraph/Common/JsonCache.php';
 
 $GLOBALS['failures'] = 0;
 $GLOBALS['checks'] = 0;

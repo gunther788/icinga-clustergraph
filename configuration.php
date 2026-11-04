@@ -7,9 +7,9 @@ $this->provideConfigTab('config', array(
     'url' => 'config'
 ));
 
-$this->menuSection('ClusterGraph', array(
-    'url' => 'clustergraph',
-    'icon' => 'clock'
+$this->menuSection('Topology Graph', array(
+    'url' => 'topologygraph',
+    'icon' => 'sitemap'
 ));
 
 

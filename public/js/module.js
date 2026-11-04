@@ -1,10 +1,10 @@
 (function (Icinga) {
 
 
-    var Clustergraph = function (module) {
+    var Topologygraph = function (module) {
         this.module = module;
         this.initialize();
-        this.module.icinga.logger.debug('Clustergraph module loaded');
+        this.module.icinga.logger.debug('Topologygraph module loaded');
     };
 
     function rgbToHex(rgb) {
@@ -749,14 +749,14 @@
         }
     };
 
-    Clustergraph.prototype = {
+    Topologygraph.prototype = {
 
         initialize: function () {
             this.module.on('rendered', this.onRenderedContainer);
         },
 
         onRenderedContainer: function (event) {
-            const container = document.getElementById('clustergraph-container');
+            const container = document.getElementById('topologygraph-container');
             // in module configuration we don't have a graph, so return peacefully
             if (!container) {
                 return;
@@ -853,7 +853,7 @@
 
 
             const viewport = document.createElement("div");
-            viewport.className = "clustergraph-viewport";
+            viewport.className = "topologygraph-viewport";
             if (background) viewport.style.backgroundColor = background;
 
             const svg = d3.select(viewport).append("svg")
@@ -863,9 +863,9 @@
             const defs = svg.append("defs");
             // One arrowhead per arrow colour
             const arrowColours = [COLOURS.edge, COLOURS.down, COLOURS.unreachable];
-            const markerFor = colour => "url(#clustergraph-arrow-" + arrowColours.indexOf(colour) + ")";
+            const markerFor = colour => "url(#topologygraph-arrow-" + arrowColours.indexOf(colour) + ")";
             arrowColours.forEach((colour, i) => {
-                const id = "clustergraph-arrow-" + i;
+                const id = "topologygraph-arrow-" + i;
                 defs.append("marker")
                     .attr("id", id)
                     .attr("viewBox", "0 -5 10 10")
@@ -884,7 +884,7 @@
             const content = zoomLayer.append("g");
 
             const emptyMessage = document.createElement("p");
-            emptyMessage.className = "clustergraph-empty";
+            emptyMessage.className = "topologygraph-empty";
             emptyMessage.hidden = true;
             viewport.append(emptyMessage);
 
@@ -1154,16 +1154,16 @@
             // --- Controls --------------------------------------------------------
 
             const controls = document.createElement("div");
-            controls.className = "clustergraph-controls";
+            controls.className = "topologygraph-controls";
 
             // Subset picker: tick one or more hosts without children to show
             // only them and everything above them
             const pickerButton = document.createElement("button");
             pickerButton.type = "button";
-            pickerButton.className = "clustergraph-picker-button";
+            pickerButton.className = "topologygraph-picker-button";
             pickerButton.title = "Show only some hosts and everything above them";
             const panel = document.createElement("div");
-            panel.className = "clustergraph-picker";
+            panel.className = "topologygraph-picker";
             panel.hidden = true;
             const filter = document.createElement("input");
             filter.type = "search";
@@ -1172,10 +1172,10 @@
             showAll.type = "button";
             showAll.textContent = "Show all";
             const panelHead = document.createElement("div");
-            panelHead.className = "clustergraph-picker-head";
+            panelHead.className = "topologygraph-picker-head";
             panelHead.append(filter, showAll);
             const list = document.createElement("div");
-            list.className = "clustergraph-picker-list";
+            list.className = "topologygraph-picker-list";
             panel.append(panelHead, list);
 
             const applySelection = () => {
@@ -1282,14 +1282,14 @@
             viewport.append(controls);
 
             const hint = document.createElement("div");
-            hint.className = "clustergraph-hint";
+            hint.className = "topologygraph-hint";
             const status = document.createElement("span");
             hint.append(status, "Scroll to zoom \u00b7 Drag or Shift + scroll to move");
             viewport.append(hint);
 
             // Legend for the colours, bottom left
             const legend = document.createElement("div");
-            legend.className = "clustergraph-legend";
+            legend.className = "topologygraph-legend";
             const swatch = (fill, opts = {}) => {
                 const ns = "http://www.w3.org/2000/svg";
                 const icon = document.createElementNS(ns, "svg");
@@ -1427,6 +1427,6 @@
         }
     };
 
-    Icinga.availableModules.clustergraph = Clustergraph;
+    Icinga.availableModules.topologygraph = Topologygraph;
 
 }(Icinga));

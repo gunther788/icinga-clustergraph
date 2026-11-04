@@ -1,6 +1,4 @@
-Module: clustergraph
-Version: 1.0.8
+Module: topologygraph
+Version: 2.0.0
   Libraries: icinga-php-library (>=0.11.0)
-Description: Visual representation of Icinga Clusters
-
-
+Description: Parent/child topology graph of the hosts in a host group

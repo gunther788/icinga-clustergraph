@@ -1,25 +1,29 @@
-# ClusterGraph for Icinga Web 2: synthetic host topology
+# Topology Graph for Icinga Web 2
 
-This is a fork of [sol1/icinga-clustergraph](https://github.com/sol1/icinga-clustergraph). The original module draws
-the Icinga 2 cluster: zones, the endpoints in each zone, and which zone reports to which parent.
+`topologygraph` is an Icinga Web 2 module that draws a **parent/child topology graph of the hosts in a host group**
+(`synthetic` by default), with their state, their service problems and live updates.
 
-This fork keeps the module's name, menu entry, configuration and API plumbing, but uses them to draw something else
-entirely: a **parent/child topology graph of the hosts in the `synthetic` host group**. Zones and endpoints are no
-longer shown.
+It started as a fork of [sol1/icinga-clustergraph](https://github.com/sol1/icinga-clustergraph), which draws the
+Icinga 2 cluster: zones, the endpoints in each zone, and which zone reports to which parent. This fork reused that
+module's settings page and API plumbing, then replaced what it draws. It was renamed from `clustergraph` to
+`topologygraph` so the two can't be confused and can be installed side by side. See
+[Upgrading from clustergraph](#upgrading-from-clustergraph).
 
 ## How the module was repurposed
 
 The upstream module asks the Icinga 2 API for zones and endpoints and draws them as a tree. This fork swaps both ends:
 
-- **Data:** `IndexController::dataAction()` asks the API for hosts and `Dependency` objects instead of zones. It
-  returns every host in the `synthetic` host group, plus any direct parent or child of one that is outside the group,
-  and the parent → child links between them. Only host-to-host dependencies are used; service dependencies are ignored.
+- **Data:** `IndexController::dataAction()` asks the API for hosts, `Dependency` objects and services instead of
+  zones. It returns every host in the configured host group, plus any direct parent or child of one that is outside
+  the group, and the parent → child links between them. Only host-to-host dependencies are used; service
+  dependencies are ignored.
 - **Drawing:** `public/js/module.js` replaces the zone tree with a layered dependency graph built with D3, described
   below.
 - **Permissions:** the API user needs `objects/query/Host`, `objects/query/Dependency` and
   `objects/query/Service` instead of the zone and endpoint permissions.
 
-Everything else (installation, the module settings page, the `clustergraph` URL and menu entry) works as before.
+The settings page and the API connection work as they did upstream, with two new settings: the host group and the
+refresh interval.
 
 ## What the graph shows
 
@@ -59,11 +63,11 @@ The layout tries to:
   share it like any other link, for example:
 
   ```
-  https://icinga.example.com/icingaweb2/clustergraph?host=db-1&host=cache-1
+  https://icinga.example.com/icingaweb2/topologygraph?host=db-1&host=cache-1
   ```
 
-- **Live updates:** while the page is visible, the graph fetches fresh data every 15 seconds and catches up straight
-  away when you return to the tab. A change of host state only recolours the existing drawing, so your zoom and
+- **Live updates:** while the page is visible, the graph fetches fresh data at the refresh interval (15 seconds by
+  default) and catches up straight away when you return to the tab. A change of host state only recolours the existing drawing, so your zoom and
   position stay put. If hosts or dependencies were added or removed, the graph is laid out again. The bottom-right
   corner shows when it last updated.
 
@@ -71,7 +75,7 @@ The layout tries to:
 
 - Icinga Web 2, with the icinga-php-library (0.11.0 or later)
 - Icinga 2 with the REST API enabled and an API user (see below)
-- A host group named `synthetic`
+- A host group to draw (`synthetic` unless you choose another in the settings)
 - Host parent/child relationships defined as Icinga 2 `Dependency` objects
 
 The graph is built from `Dependency` objects only. If your parents are kept in a custom variable, add an apply rule
@@ -86,16 +90,17 @@ apply Dependency "host-parent" for (parent in host.vars.parents) to Host {
 
 ## Installation
 
-1. Clone this fork into the Icinga Web 2 `modules` directory as `clustergraph`:
+1. Clone the repository into the Icinga Web 2 `modules` directory as `topologygraph` (the folder name must match the
+   module name):
 
    ```
-   git clone https://github.com/gunther788/icinga-clustergraph.git /usr/share/icingaweb2/modules/clustergraph
+   git clone https://github.com/gunther788/icinga-clustergraph.git /usr/share/icingaweb2/modules/topologygraph
    ```
 
 2. Enable the module in the Icinga Web 2 web interface, or on the command line:
 
    ```
-   icingacli module enable clustergraph
+   icingacli module enable topologygraph
    ```
 
 ## Configuration
@@ -103,27 +108,72 @@ apply Dependency "host-parent" for (parent in host.vars.parents) to Host {
 1. Add an API user to Icinga 2, for example in `api-users.conf`:
 
    ```
-   object ApiUser "clustergraph" {
+   object ApiUser "topologygraph" {
      password = "change-me"
      permissions = [ "objects/query/Host", "objects/query/Dependency", "objects/query/Service" ]
    }
    ```
 
-2. In Icinga Web 2, go to **Configuration → Modules → clustergraph → Config**.
-3. Enter the API user, password, endpoint (host name) and port, and choose the web interface your host links should
-   open in: Icinga Web 2 (monitoring) or Icinga DB Web.
-4. Save the changes, then open **ClusterGraph** from the menu.
-
-## Adjusting it
-
-These are constants in the code rather than settings:
-
-- **Host group:** `synthetic`, in `application/controllers/IndexController.php`.
-- **Refresh interval:** `REFRESH_MS` (15 seconds), near the top of `public/js/module.js`.
-- **Font size and base spacing:** `FONT_SIZE` and `BASE`, also in `public/js/module.js`.
+2. In Icinga Web 2, go to **Configuration → Modules → topologygraph → Config**.
+3. Fill in the settings:
+   - **API user, password, endpoint (host name) and port** of the Icinga 2 API;
+   - **Web UI:** where host links open, Icinga Web 2 (monitoring) or Icinga DB Web;
+   - **Host group:** the group to draw (default `synthetic`);
+   - **Refresh interval:** seconds between updates while the graph is open (default 15, at least 5).
+4. Save the changes, then open **Topology Graph** from the menu.
 
 Without `objects/query/Service` the graph still works, but without service rings. The hover text then says that
 service details are not available.
+
+Font size and spacing are constants (`FONT_SIZE` and `BASE`) near the top of `public/js/module.js`.
+
+## Load on the Icinga API
+
+Each update makes up to four small requests, each filtered on the Icinga side:
+
+1. the hosts in the group;
+2. the host-to-host dependencies that touch them;
+3. the hosts outside the group at the other end of those dependencies;
+4. the services of all drawn hosts.
+
+The finished graph is cached on the Icinga Web server for half the refresh interval, in a folder in the system's
+temporary directory. Several people with the page open therefore share one set of requests. Failed requests are
+not cached.
+
+## Upgrading from clustergraph
+
+If you ran this fork under its old name, `clustergraph`:
+
+1. Disable the old module:
+
+   ```
+   icingacli module disable clustergraph
+   ```
+
+2. Rename the module folder and update it:
+
+   ```
+   mv /usr/share/icingaweb2/modules/clustergraph /usr/share/icingaweb2/modules/topologygraph
+   git -C /usr/share/icingaweb2/modules/topologygraph pull
+   ```
+
+3. Move the settings:
+
+   ```
+   mv /etc/icingaweb2/modules/clustergraph /etc/icingaweb2/modules/topologygraph
+   ```
+
+4. Enable the new module:
+
+   ```
+   icingacli module enable topologygraph
+   ```
+
+5. Update anything that refers to the old name:
+   - bookmarks, which now start `…/topologygraph` instead of `…/clustergraph`;
+   - Icinga Web roles that grant `module/clustergraph`, which should grant `module/topologygraph`.
+
+Add `objects/query/Service` to the API user's permissions if it doesn't have it yet.
 
 ## Tests
 
@@ -140,8 +190,8 @@ The `tests/` folder has PHP tests for the data the module sends and browser test
 
 ## Contributing
 
-Changes to this fork go to https://github.com/gunther788/icinga-clustergraph. The original zone and endpoint graph
-lives upstream at https://github.com/sol1/icinga-clustergraph.
+Changes go to https://github.com/gunther788/icinga-clustergraph; the repository keeps its original name. The
+original zone and endpoint graph lives upstream at https://github.com/sol1/icinga-clustergraph.
 
 ## License
 

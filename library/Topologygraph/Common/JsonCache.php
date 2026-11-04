@@ -1,6 +1,6 @@
 <?php
 
-namespace Icinga\Module\Clustergraph\Common;
+namespace Icinga\Module\Topologygraph\Common;
 
 /**
  * A small file cache for the graph data, so several people with the page open

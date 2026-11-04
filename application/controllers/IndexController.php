@@ -1,23 +1,23 @@
 <?php
 
 
-namespace Icinga\Module\Clustergraph\Controllers;
+namespace Icinga\Module\Topologygraph\Controllers;
 
 error_reporting(E_ALL);
 ini_set('display_errors', '1');
 
 use Icinga\Application\Icinga;
 use Icinga\Application\Logger;
-use Icinga\Module\Clustergraph\Common\GraphSource;
-use Icinga\Module\Clustergraph\Common\IcingaApi;
-use Icinga\Module\Clustergraph\Common\JsonCache;
+use Icinga\Module\Topologygraph\Common\GraphSource;
+use Icinga\Module\Topologygraph\Common\IcingaApi;
+use Icinga\Module\Topologygraph\Common\JsonCache;
 use Icinga\Web\Controller;
 
 class IndexController extends Controller
 {
     public function indexAction()
     {
-        $config = \Icinga\Application\Config::module('clustergraph');
+        $config = \Icinga\Application\Config::module('topologygraph');
 
         $ICINGA_API_ENDPOINT = $config->get('api', 'host');
         $ICINGA_API_USER = $config->get('api', 'username');
@@ -43,7 +43,7 @@ class IndexController extends Controller
     {
         // Configuration
 
-        $config = \Icinga\Application\Config::module('clustergraph');
+        $config = \Icinga\Application\Config::module('topologygraph');
         $ICINGA_API_ENDPOINT = $config->get('api', 'host');
         $ICINGA_API_USER = $config->get('api', 'username');
         $ICINGA_API_PASSWORD = $config->get('api', 'password');
@@ -72,7 +72,7 @@ class IndexController extends Controller
         // Everyone looking at the graph gets the same data (one API user), so
         // share it for half the refresh interval: several open pages then cause
         // one set of API requests instead of one each
-        $cache = new JsonCache(sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'icingaweb2-clustergraph');
+        $cache = new JsonCache(sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'icingaweb2-topologygraph');
         $cacheKey = json_encode([
             $ICINGA_API_ENDPOINT, $config->get('api', 'port'), $ICINGA_API_USER, $group, $ICINGAWEB_HOST_PATH
         ]);
@@ -89,7 +89,7 @@ class IndexController extends Controller
                 $group,
                 $ICINGAWEB_HOST_PATH,
                 function (\Exception $e) {
-                    Logger::warning('clustergraph: could not fetch services: %s', $e->getMessage());
+                    Logger::warning('topologygraph: could not fetch services: %s', $e->getMessage());
                 }
             );
         });

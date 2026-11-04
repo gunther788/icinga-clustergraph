@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const {open, fixture, transform} = require('./harness');
 
 const geometry = page => page.evaluate(() => {
-    const v = document.querySelector('.clustergraph-viewport');
+    const v = document.querySelector('.topologygraph-viewport');
     const c = document.querySelector('.container');
     const r = v.getBoundingClientRect(), cr = c.getBoundingClientRect();
     return {
@@ -39,7 +39,7 @@ test('stays compact on a large screen', async () => {
     try {
         // Gaps between the side-by-side lists of boxes stay small
         const gaps = await page.evaluate(() => {
-            const rects = [...document.querySelectorAll('.clustergraph-viewport rect')].map(r => r.getBoundingClientRect());
+            const rects = [...document.querySelectorAll('.topologygraph-viewport rect')].map(r => r.getBoundingClientRect());
             const columns = [];
             rects.forEach(r => {
                 const column = columns.find(c => Math.abs(c.left - r.left) < 30 || Math.abs(c.right - r.right) < 30);
@@ -67,7 +67,7 @@ test('full screen covers the window and comes back', async () => {
         await page.click('button[title^="Toggle full screen"]');
         await page.waitForTimeout(600);
         const inside = await page.evaluate(() => {
-            const r = document.querySelector('.clustergraph-viewport').getBoundingClientRect();
+            const r = document.querySelector('.topologygraph-viewport').getBoundingClientRect();
             return {fullscreen: document.fullscreenElement !== null, width: r.width, height: r.height};
         });
         assert.deepEqual(inside, {fullscreen: true, width: 1280, height: 720});

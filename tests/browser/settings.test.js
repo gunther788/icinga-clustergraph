@@ -33,13 +33,13 @@ test('the host group name from the settings is shown', async () => {
     data.nodes.find(n => n.name === 'core-router').synthetic = false;
     const {page, server, close} = await open({data});
     try {
-        const title = await page.$eval('.clustergraph-viewport a[href="#core-router"] title', t => t.textContent);
+        const title = await page.$eval('.topologygraph-viewport a[href="#core-router"] title', t => t.textContent);
         assert.match(title, /not in the web-checks host group/);
 
         server.data = {nodes: [], links: [], hostgroup: 'web-checks'};
         await page.evaluate(() => cg.onRenderedContainer());
         await page.waitForTimeout(500);
-        assert.equal(await page.textContent('.clustergraph-empty'), 'No hosts found in the "web-checks" host group.');
+        assert.equal(await page.textContent('.topologygraph-empty'), 'No hosts found in the "web-checks" host group.');
     } finally {
         await close();
     }

@@ -9,7 +9,7 @@ test('the wheel zooms around the pointer and Shift + wheel moves', async () => {
         const pointer = {x: 700, y: 400};
         const under = async () => {
             const t = await transform(page);
-            const box = await page.$eval('.clustergraph-viewport', v => v.getBoundingClientRect().toJSON());
+            const box = await page.$eval('.topologygraph-viewport', v => v.getBoundingClientRect().toJSON());
             return {x: (pointer.x - box.left - t.x) / t.k, y: (pointer.y - box.top - t.y) / t.k};
         };
         await page.mouse.move(pointer.x, pointer.y);
@@ -69,7 +69,7 @@ test('zoom buttons', async () => {
 test('a click opens a host, a drag does not', async () => {
     const {page, close} = await open({data: fixture('small')});
     try {
-        const dot = page.locator('.clustergraph-viewport a[href="#lb-1"] circle').last();
+        const dot = page.locator('.topologygraph-viewport a[href="#lb-1"] circle').last();
         const box = await dot.boundingBox();
         await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
         await page.mouse.down();

@@ -1,6 +1,6 @@
 <?php
 
-namespace Icinga\Module\Clustergraph\Common;
+namespace Icinga\Module\Topologygraph\Common;
 
 /**
  * Fetches just what the graph needs from the Icinga 2 API, in small requests

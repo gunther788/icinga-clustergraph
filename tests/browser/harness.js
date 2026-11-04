@@ -14,7 +14,7 @@ const less = require('less');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const ORIGIN = 'http://icinga.test';
-const PAGE = '/icingaweb2/clustergraph';
+const PAGE = '/icingaweb2/topologygraph';
 
 let cssPromise = null;
 function moduleCss() {
@@ -62,14 +62,14 @@ async function open({data, query = '', viewport = {width: 1280, height: 720}, cl
         <div id="header"></div><div id="sidebar"></div>
         <div class="container" id="col1" data-icinga-url="${PAGE}">
           <div class="controls"></div>
-          <div class="content"><div id="clustergraph-container" class="clustergraph"></div></div>
+          <div class="content"><div id="topologygraph-container" class="topologygraph"></div></div>
         </div>
         <div id="navigation" style="color: #ccc"></div>
         <script src="/d3.js"></script>
         <script>window.Icinga = {availableModules: {}};</script>
         <script src="/module.js"></script>
         <script>
-          window.cg = Object.create(Icinga.availableModules.clustergraph.prototype);
+          window.cg = Object.create(Icinga.availableModules.topologygraph.prototype);
           cg.onRenderedContainer();
         </script>
     </body></html>`;
@@ -106,14 +106,14 @@ async function open({data, query = '', viewport = {width: 1280, height: 720}, cl
 /** Let the first fetch, layout and fit finish */
 async function settle(page, clock = false) {
     if (clock) await page.clock.runFor(500);
-    await page.waitForSelector('.clustergraph-viewport svg a', {timeout: 10000}).catch(() => {});
+    await page.waitForSelector('.topologygraph-viewport svg a', {timeout: 10000}).catch(() => {});
     await page.waitForTimeout(400);
 }
 
 /** The current zoom transform: {x, y, k} */
 function transform(page) {
     return page.evaluate(() => {
-        const value = document.querySelector('.clustergraph-viewport svg > g').getAttribute('transform') || '';
+        const value = document.querySelector('.topologygraph-viewport svg > g').getAttribute('transform') || '';
         const match = /translate\(([-\d.e]+),([-\d.e]+)\) scale\(([-\d.e]+)\)/.exec(value);
         return match ? {x: +match[1], y: +match[2], k: +match[3]} : {x: 0, y: 0, k: 1};
     });
@@ -126,7 +126,7 @@ function transform(page) {
  */
 function metrics(page) {
     return page.evaluate(() => {
-        const svg = document.querySelector('.clustergraph-viewport svg');
+        const svg = document.querySelector('.topologygraph-viewport svg');
         const arrows = [...svg.querySelectorAll('path[marker-end]')].map(element => {
             const n = element.getAttribute('d').match(/-?[\d.]+(e-?\d+)?/g).map(Number);
             return {s: {x: n[0], y: n[1]}, t: {x: n[n.length - 2], y: n[n.length - 1]}};
@@ -158,7 +158,7 @@ function metrics(page) {
 
 /** Names of the hosts currently drawn */
 function drawnHosts(page) {
-    return page.$$eval('.clustergraph-viewport svg a text', texts => texts.map(t => t.textContent).sort());
+    return page.$$eval('.topologygraph-viewport svg a text', texts => texts.map(t => t.textContent).sort());
 }
 
 module.exports = {open, settle, fixture, transform, metrics, drawnHosts, ORIGIN, PAGE};

@@ -6,9 +6,9 @@
 
 require __DIR__ . '/lib.php';
 
-use Icinga\Module\Clustergraph\Common\JsonCache;
+use Icinga\Module\Topologygraph\Common\JsonCache;
 
-$directory = sys_get_temp_dir() . '/clustergraph-cache-test-' . getmypid();
+$directory = sys_get_temp_dir() . '/topologygraph-cache-test-' . getmypid();
 $now = 1000;
 $cache = new JsonCache($directory, function () use (&$now) {
     return $now;
@@ -49,7 +49,7 @@ check('exceptions are passed on', $thrown, 'API down');
 $cache->remember('failing', 7, $compute);
 check('and nothing was cached for them', $calls, 5);
 
-$unwritable = new JsonCache('/proc/clustergraph-not-writable');
+$unwritable = new JsonCache('/proc/topologygraph-not-writable');
 check('an unusable cache directory still returns the value', $unwritable->remember('k', 7, function () {
     return 42;
 }), 42);

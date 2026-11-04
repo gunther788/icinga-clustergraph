@@ -10,7 +10,7 @@
 
 require __DIR__ . '/lib.php';
 
-use Icinga\Module\Clustergraph\Common\GraphBuilder;
+use Icinga\Module\Topologygraph\Common\GraphBuilder;
 
 function host($name, array $attrs = [])
 {

@@ -7,7 +7,7 @@
 
 require __DIR__ . '/lib.php';
 
-use Icinga\Module\Clustergraph\Common\GraphSource;
+use Icinga\Module\Topologygraph\Common\GraphSource;
 
 /**
  * A fake Icinga API: answers each request from $answers by its kind

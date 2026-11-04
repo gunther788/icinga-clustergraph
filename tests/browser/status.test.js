@@ -25,7 +25,7 @@ function statusSample() {
 
 const hostStyle = page => page.evaluate(() => {
     const result = {};
-    document.querySelectorAll('.clustergraph-viewport svg a').forEach(a => {
+    document.querySelectorAll('.topologygraph-viewport svg a').forEach(a => {
         const [ring, dot] = a.querySelectorAll('circle');
         result[a.querySelector('text').textContent] = {
             fill: dot.getAttribute('fill'),
@@ -40,12 +40,12 @@ const hostStyle = page => page.evaluate(() => {
 
 // Colour and opacity of the arrow into each child, from the drawn paths
 const arrowsInto = page => page.evaluate(() => {
-    const hosts = [...document.querySelectorAll('.clustergraph-viewport svg a')].map(a => {
+    const hosts = [...document.querySelectorAll('.topologygraph-viewport svg a')].map(a => {
         const m = /translate\(([-\d.]+),([-\d.]+)\)/.exec(a.getAttribute('transform'));
         return {name: a.querySelector('text').textContent, x: +m[1], y: +m[2]};
     });
     const result = {};
-    document.querySelectorAll('.clustergraph-viewport svg path[marker-end]').forEach(path => {
+    document.querySelectorAll('.topologygraph-viewport svg path[marker-end]').forEach(path => {
         const n = path.getAttribute('d').match(/-?[\d.]+/g).map(Number);
         const end = {x: n[n.length - 2], y: n[n.length - 1]};
         const child = hosts.find(h => Math.abs(h.x - end.x) < 1 && Math.abs(h.y - end.y) < 1);
@@ -81,7 +81,7 @@ test('host states, handled problems and service rings', async () => {
         assert.match(s['web-2'].title, /services: 3, all OK/);
         assert.match(s['standalone'].title, /services: not available/);
 
-        const legend = await page.$$eval('.clustergraph-legend span', items => items.map(i => i.textContent));
+        const legend = await page.$$eval('.topologygraph-legend span', items => items.map(i => i.textContent));
         assert.deepEqual(legend, ['up', 'down', 'unreachable (parent down)', 'acknowledged / downtime', 'pending', 'service problem']);
         assert.deepEqual(errors, []);
     } finally {
@@ -94,11 +94,11 @@ test('arrows take the colour of the host they point at', async () => {
     try {
         const a = await arrowsInto(page);
         assert.ok(a['web-2'].every(x => x.stroke === '#ff5566' && x.opacity === 0.85), 'into a down host: red');
-        assert.ok(a['api-1'].every(x => x.stroke === '#aa44ff' && x.marker === 'url(#clustergraph-arrow-2)'), 'into an unreachable host: purple');
+        assert.ok(a['api-1'].every(x => x.stroke === '#aa44ff' && x.marker === 'url(#topologygraph-arrow-2)'), 'into an unreachable host: purple');
         assert.ok(a['lb-1'].every(x => x.stroke === '#ff5566' && x.opacity === 0.35), 'into a handled host: faded red');
         assert.ok(a['db-1'].every(x => x.stroke === '#00c3ed' && x.opacity === 0.5), 'into an up host: blue');
         // Unhandled problems are drawn last, on top
-        const order = await page.$$eval('.clustergraph-viewport svg path[marker-end]', ps => ps.map(p => +p.getAttribute('opacity')));
+        const order = await page.$$eval('.topologygraph-viewport svg path[marker-end]', ps => ps.map(p => +p.getAttribute('opacity')));
         assert.equal(order[order.length - 1], 0.85);
     } finally {
         await close();
