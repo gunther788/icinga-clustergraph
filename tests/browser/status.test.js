@@ -104,3 +104,51 @@ test('arrows take the colour of the host they point at', async () => {
         await close();
     }
 });
+
+test('services with notifications disabled can be left out, via the URL or the checkbox', async () => {
+    const data = statusSample();
+    const set = (name, attrs) => Object.assign(data.nodes.find(n => n.name === name), attrs);
+    // web-1's critical service has notifications disabled; db-1's warning has them enabled
+    data.nodes.forEach(n => { n.services_notified = n.services; });
+    set('web-1', {services_notified: services({total: 2, ok: 2})});
+    const ring = page => page.evaluate(() => {
+        const result = {};
+        document.querySelectorAll('.topologygraph-viewport svg a').forEach(a => {
+            const ringElement = a.querySelector('circle');
+            result[a.querySelector('text').textContent] = {
+                ring: ringElement.getAttribute('display') === 'none' ? null : ringElement.getAttribute('stroke'),
+                title: a.querySelector('title').textContent
+            };
+        });
+        return result;
+    });
+    const url = page => page.evaluate(() => location.pathname + location.search);
+
+    const viaUrl = await open({data, query: '?host=db-1&services=notified'});
+    try {
+        const r = await ring(viaUrl.page);
+        assert.equal(r['web-1'].ring, null, 'no ring: its only problem is a silenced service');
+        assert.match(r['web-1'].title, /services with notifications: 2, all OK/);
+        assert.equal(r['db-1'].ring, '#ffaa44', 'notified problems still show');
+        assert.equal(await viaUrl.page.isChecked('.topologygraph-toggle input'), true, 'checkbox reflects the URL');
+        assert.equal(await url(viaUrl.page), '/icingaweb2/topologygraph?host=db-1&services=notified', 'host selection kept alongside');
+        assert.deepEqual(viaUrl.errors, []);
+    } finally {
+        await viaUrl.close();
+    }
+
+    const viaCheckbox = await open({data});
+    try {
+        assert.equal((await ring(viaCheckbox.page))['web-1'].ring, '#ff5566', 'by default every service counts');
+        await viaCheckbox.page.check('.topologygraph-toggle input');
+        await viaCheckbox.page.waitForTimeout(100);
+        assert.equal((await ring(viaCheckbox.page))['web-1'].ring, null, 'ticking the box leaves it out');
+        assert.equal(await url(viaCheckbox.page), '/icingaweb2/topologygraph?services=notified');
+        await viaCheckbox.page.uncheck('.topologygraph-toggle input');
+        await viaCheckbox.page.waitForTimeout(100);
+        assert.equal((await ring(viaCheckbox.page))['web-1'].ring, '#ff5566');
+        assert.equal(await url(viaCheckbox.page), '/icingaweb2/topologygraph');
+    } finally {
+        await viaCheckbox.close();
+    }
+});

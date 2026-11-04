@@ -19,7 +19,8 @@ final class GraphSource
     const HOST_ATTRS = 'attrs=name&attrs=display_name&attrs=state&attrs=last_check&attrs=groups&attrs=zone'
         . '&attrs=last_reachable&attrs=acknowledgement&attrs=downtime_depth';
     const DEPENDENCY_ATTRS = 'attrs=parent_host_name&attrs=child_host_name&attrs=child_service_name';
-    const SERVICE_ATTRS = 'attrs=host_name&attrs=state&attrs=last_check&attrs=acknowledgement&attrs=downtime_depth';
+    const SERVICE_ATTRS = 'attrs=host_name&attrs=state&attrs=last_check&attrs=acknowledgement&attrs=downtime_depth'
+        . '&attrs=enable_notifications';
 
     /**
      * @param callable $api      function (string $endpoint, array $body): array of API results
