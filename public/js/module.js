@@ -1,10 +1,10 @@
 (function (Icinga) {
 
 
-    var Clustergraph = function (module) {
+    var Topologygraph = function (module) {
         this.module = module;
         this.initialize();
-        this.module.icinga.logger.debug('Clustergraph module loaded');
+        this.module.icinga.logger.debug('Topologygraph module loaded');
     };
 
     function rgbToHex(rgb) {
@@ -70,8 +70,10 @@
         return "services: " + services.total + (parts.length ? " (" + parts.join(", ") + ")" : ", all OK");
     }
 
-    // How often to fetch fresh host states while the page is visible
+    // How often to fetch fresh host states while the page is visible, unless
+    // the server says otherwise (the module's "Refresh interval" setting)
     const REFRESH_MS = 15000;
+    const refreshInterval = data => data && data.refresh >= 5 ? data.refresh * 1000 : REFRESH_MS;
 
     /**
      * Everything that affects the layout (hosts, their labels and group
@@ -747,14 +749,14 @@
         }
     };
 
-    Clustergraph.prototype = {
+    Topologygraph.prototype = {
 
         initialize: function () {
             this.module.on('rendered', this.onRenderedContainer);
         },
 
         onRenderedContainer: function (event) {
-            const container = document.getElementById('clustergraph-container');
+            const container = document.getElementById('topologygraph-container');
             // in module configuration we don't have a graph, so return peacefully
             if (!container) {
                 return;
@@ -794,6 +796,12 @@
                         if (!graph.isConnected()) return;
                         graph.setData(fresh);
                         graph.setStatus("Updated " + time());
+                        // Follow a changed refresh interval setting
+                        if (refreshInterval(fresh) !== interval) {
+                            interval = refreshInterval(fresh);
+                            clearInterval(timer);
+                            timer = setInterval(refresh, interval);
+                        }
                     }).catch(() => {
                         if (graph.isConnected()) graph.setStatus("Update failed, retrying");
                     }).finally(() => { busy = false; });
@@ -801,7 +809,8 @@
                 // Catch up straight away when the tab becomes visible again
                 const onVisible = () => { if (!document.hidden) refresh(); };
                 document.addEventListener("visibilitychange", onVisible);
-                timer = setInterval(refresh, REFRESH_MS);
+                let interval = refreshInterval(data);
+                timer = setInterval(refresh, interval);
                 this.stopRefresh = stop;
             }).catch(error => {
                 const message = document.createElement("p");
@@ -844,7 +853,7 @@
 
 
             const viewport = document.createElement("div");
-            viewport.className = "clustergraph-viewport";
+            viewport.className = "topologygraph-viewport";
             if (background) viewport.style.backgroundColor = background;
 
             const svg = d3.select(viewport).append("svg")
@@ -854,9 +863,9 @@
             const defs = svg.append("defs");
             // One arrowhead per arrow colour
             const arrowColours = [COLOURS.edge, COLOURS.down, COLOURS.unreachable];
-            const markerFor = colour => "url(#clustergraph-arrow-" + arrowColours.indexOf(colour) + ")";
+            const markerFor = colour => "url(#topologygraph-arrow-" + arrowColours.indexOf(colour) + ")";
             arrowColours.forEach((colour, i) => {
-                const id = "clustergraph-arrow-" + i;
+                const id = "topologygraph-arrow-" + i;
                 defs.append("marker")
                     .attr("id", id)
                     .attr("viewBox", "0 -5 10 10")
@@ -875,8 +884,7 @@
             const content = zoomLayer.append("g");
 
             const emptyMessage = document.createElement("p");
-            emptyMessage.className = "clustergraph-empty";
-            emptyMessage.textContent = 'No hosts found in the "synthetic" host group.';
+            emptyMessage.className = "topologygraph-empty";
             emptyMessage.hidden = true;
             viewport.append(emptyMessage);
 
@@ -942,6 +950,7 @@
             // --- Data, subset and drawing ---------------------------------------
 
             let fullData = {nodes: [], links: []};
+            let hostGroup = "synthetic"; // from the module settings, sent with the data
             let selected = readSelection(); // host names; empty means all hosts
             let drawn = null; // {structure, update(data)} for what is on screen
             let laidOutFor = {width: 0, height: 0};
@@ -954,6 +963,7 @@
                 const links = data.links || [];
                 content.selectAll("*").remove();
                 emptyMessage.hidden = nodes.length > 0;
+                emptyMessage.textContent = `No hosts found in the "${hostGroup}" host group.`;
                 laidOutFor = {width: viewport.clientWidth, height: viewport.clientHeight};
                 const area = drawingArea();
                 if (!nodes.length) {
@@ -1050,7 +1060,7 @@
                         stateName(d) === "unreachable" ? "(down because a parent is down)" : null,
                         servicesText(d.services),
                         d.zone ? "zone: " + d.zone : null,
-                        d.synthetic ? null : "not in the synthetic host group"
+                        d.synthetic ? null : "not in the " + hostGroup + " host group"
                     ].filter(Boolean).join("\n"));
                     const ringState = d => d.services && (d.services.worst_unhandled
                         || (d.services.worst !== "ok" ? d.services.worst : null));
@@ -1144,16 +1154,16 @@
             // --- Controls --------------------------------------------------------
 
             const controls = document.createElement("div");
-            controls.className = "clustergraph-controls";
+            controls.className = "topologygraph-controls";
 
             // Subset picker: tick one or more hosts without children to show
             // only them and everything above them
             const pickerButton = document.createElement("button");
             pickerButton.type = "button";
-            pickerButton.className = "clustergraph-picker-button";
+            pickerButton.className = "topologygraph-picker-button";
             pickerButton.title = "Show only some hosts and everything above them";
             const panel = document.createElement("div");
-            panel.className = "clustergraph-picker";
+            panel.className = "topologygraph-picker";
             panel.hidden = true;
             const filter = document.createElement("input");
             filter.type = "search";
@@ -1162,10 +1172,10 @@
             showAll.type = "button";
             showAll.textContent = "Show all";
             const panelHead = document.createElement("div");
-            panelHead.className = "clustergraph-picker-head";
+            panelHead.className = "topologygraph-picker-head";
             panelHead.append(filter, showAll);
             const list = document.createElement("div");
-            list.className = "clustergraph-picker-list";
+            list.className = "topologygraph-picker-list";
             panel.append(panelHead, list);
 
             const applySelection = () => {
@@ -1272,14 +1282,14 @@
             viewport.append(controls);
 
             const hint = document.createElement("div");
-            hint.className = "clustergraph-hint";
+            hint.className = "topologygraph-hint";
             const status = document.createElement("span");
             hint.append(status, "Scroll to zoom \u00b7 Drag or Shift + scroll to move");
             viewport.append(hint);
 
             // Legend for the colours, bottom left
             const legend = document.createElement("div");
-            legend.className = "clustergraph-legend";
+            legend.className = "topologygraph-legend";
             const swatch = (fill, opts = {}) => {
                 const ns = "http://www.w3.org/2000/svg";
                 const icon = document.createElementNS(ns, "svg");
@@ -1404,6 +1414,7 @@
                 // are unchanged, else re-lay out (keeping the user's view)
                 setData: data => {
                     fullData = {nodes: data.nodes || [], links: data.links || []};
+                    hostGroup = data.hostgroup || "synthetic";
                     updatePicker();
                     const visible = visibleData();
                     if (drawn && structureOf(visible) === drawn.structure) {
@@ -1416,6 +1427,6 @@
         }
     };
 
-    Icinga.availableModules.clustergraph = Clustergraph;
+    Icinga.availableModules.topologygraph = Topologygraph;
 
 }(Icinga));

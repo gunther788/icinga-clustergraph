@@ -1,6 +1,6 @@
 <?php
 
-namespace Icinga\Module\Clustergraph\Common;
+namespace Icinga\Module\Topologygraph\Common;
 
 /**
  * Turns Icinga 2 API results into the graph the front end draws.

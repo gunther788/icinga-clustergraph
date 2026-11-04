@@ -1,7 +1,7 @@
 <?php
 /* Originally from Icinga Web 2 icingadb Module | GPLv2+ */
 
-namespace Icinga\Module\Clustergraph\Common;
+namespace Icinga\Module\Topologygraph\Common;
 
 
 use GuzzleHttp\Client;
@@ -30,7 +30,7 @@ class IcingaApi
      */
     public function sendCommand($method="GET", $endpoint='objects/zones', $body = null)
     {
-        $transport =Config::module('clustergraph')->getSection("api")->toArray();
+        $transport =Config::module('topologygraph')->getSection("api")->toArray();
 
         $headers = ['Accept' => 'application/json'];
         if ($method !== 'POST') {

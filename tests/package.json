@@ -1,10 +1,10 @@
 {
-  "name": "clustergraph-tests",
+  "name": "topologygraph-tests",
   "private": true,
-  "description": "Browser and PHP tests for the clustergraph module",
+  "description": "Browser and PHP tests for the topologygraph module",
   "scripts": {
     "test": "npm run test:php && npm run test:browser",
-    "test:php": "php php/GraphBuilderTest.php",
+    "test:php": "php php/GraphBuilderTest.php && php php/GraphSourceTest.php && php php/JsonCacheTest.php",
     "test:browser": "node --test --test-concurrency=1 \"browser/*.test.js\""
   },
   "devDependencies": {

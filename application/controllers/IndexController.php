@@ -1,24 +1,23 @@
 <?php
 
 
-namespace Icinga\Module\Clustergraph\Controllers;
+namespace Icinga\Module\Topologygraph\Controllers;
 
 error_reporting(E_ALL);
 ini_set('display_errors', '1');
 
 use Icinga\Application\Icinga;
 use Icinga\Application\Logger;
-use Icinga\Module\Clustergraph\Common\GraphBuilder;
-use Icinga\Module\Clustergraph\Common\IcingaApi;
-use Icinga\Module\Clustergraph\Common\IcingaDbZones;
-use Icinga\Module\Clustergraph\Common\IdoZones;
+use Icinga\Module\Topologygraph\Common\GraphSource;
+use Icinga\Module\Topologygraph\Common\IcingaApi;
+use Icinga\Module\Topologygraph\Common\JsonCache;
 use Icinga\Web\Controller;
 
 class IndexController extends Controller
 {
     public function indexAction()
     {
-        $config = \Icinga\Application\Config::module('clustergraph');
+        $config = \Icinga\Application\Config::module('topologygraph');
 
         $ICINGA_API_ENDPOINT = $config->get('api', 'host');
         $ICINGA_API_USER = $config->get('api', 'username');
@@ -44,7 +43,7 @@ class IndexController extends Controller
     {
         // Configuration
 
-        $config = \Icinga\Application\Config::module('clustergraph');
+        $config = \Icinga\Application\Config::module('topologygraph');
         $ICINGA_API_ENDPOINT = $config->get('api', 'host');
         $ICINGA_API_USER = $config->get('api', 'username');
         $ICINGA_API_PASSWORD = $config->get('api', 'password');
@@ -63,43 +62,41 @@ class IndexController extends Controller
         }
 
 
+        // Host group to draw and refresh interval, from the module settings
+        $group = trim((string) $config->get('graph', 'hostgroup', 'synthetic'));
+        if ($group === '') {
+            $group = 'synthetic';
+        }
+        $refresh = max(5, (int) $config->get('graph', 'refresh', 15));
+
+        // Everyone looking at the graph gets the same data (one API user), so
+        // share it for half the refresh interval: several open pages then cause
+        // one set of API requests instead of one each
+        $cache = new JsonCache(sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'icingaweb2-topologygraph');
+        $cacheKey = json_encode([
+            $ICINGA_API_ENDPOINT, $config->get('api', 'port'), $ICINGA_API_USER, $group, $ICINGAWEB_HOST_PATH
+        ]);
         $api = new IcingaApi();
-        $hosts = $api->sendCommand(
-            'GET',
-            'objects/hosts?attrs=name&attrs=display_name&attrs=state&attrs=last_check&attrs=groups&attrs=zone'
-            . '&attrs=last_reachable&attrs=acknowledgement&attrs=downtime_depth'
-        );
-        $dependencies = $api->sendCommand(
-            'GET',
-            'objects/dependencies?attrs=parent_host_name&attrs=child_host_name&attrs=child_service_name'
-        );
+        $graph = $cache->remember($cacheKey, intdiv($refresh, 2), function () use ($api, $group, $ICINGAWEB_HOST_PATH) {
+            return GraphSource::fetch(
+                function ($endpoint, $body) use ($api) {
+                    $results = $api->sendCommand('GET', $endpoint, $body);
+                    if (! is_array($results)) {
+                        throw new \Exception("Failed to fetch or decode data from the Icinga2 API.");
+                    }
+                    return $results;
+                },
+                $group,
+                $ICINGAWEB_HOST_PATH,
+                function (\Exception $e) {
+                    Logger::warning('topologygraph: could not fetch services: %s', $e->getMessage());
+                }
+            );
+        });
 
-        if (!is_array($hosts) || !is_array($dependencies)) {
-            throw new \Exception("Failed to fetch or decode data from the Icinga2 API.");
-        }
-
-        // Every host in the "synthetic" group, plus direct parents and children
-        $selection = GraphBuilder::select($hosts, $dependencies, 'synthetic');
-
-        // Services of the drawn hosts, filtered on the Icinga side. Without
-        // them (no services, or the API user may not query them) the graph is
-        // drawn without service problem rings.
-        $services = [];
-        if ($selection['names']) {
-            try {
-                $services = $api->sendCommand(
-                    'GET',
-                    'objects/services?attrs=host_name&attrs=state&attrs=last_check'
-                    . '&attrs=acknowledgement&attrs=downtime_depth',
-                    ['filter' => 'host.name in names', 'filter_vars' => ['names' => $selection['names']]]
-                );
-            } catch (\Exception $e) {
-                Logger::warning('clustergraph: could not fetch services: %s', $e->getMessage());
-                $services = null;
-            }
-        }
-
-        $this->_helper->json(GraphBuilder::build($selection, $hosts, $services, $ICINGAWEB_HOST_PATH));
+        $graph['hostgroup'] = $group;
+        $graph['refresh'] = $refresh;
+        $this->_helper->json($graph);
     }
 
 

@@ -5,10 +5,10 @@ const {open, fixture} = require('./harness');
 
 const dimmed = page => page.evaluate(() => {
     const hosts = {};
-    document.querySelectorAll('.clustergraph-viewport svg a').forEach(a => {
+    document.querySelectorAll('.topologygraph-viewport svg a').forEach(a => {
         hosts[a.querySelector('text').textContent] = a.style.opacity === '' ? 'shown' : 'dimmed';
     });
-    const arrows = [...document.querySelectorAll('.clustergraph-viewport svg path[marker-end]')]
+    const arrows = [...document.querySelectorAll('.topologygraph-viewport svg path[marker-end]')]
         .map(p => p.style.opacity === '' || p.style.opacity === '1' ? 'shown' : 'dimmed');
     return {hosts, shownArrows: arrows.filter(a => a === 'shown').length, arrows: arrows.length};
 });
@@ -16,7 +16,7 @@ const dimmed = page => page.evaluate(() => {
 test('hovering a host highlights everything above and below it', async () => {
     const {page, errors, close} = await open({data: fixture('small')});
     try {
-        await page.hover('.clustergraph-viewport a[href="#web-1"] circle:last-of-type');
+        await page.hover('.topologygraph-viewport a[href="#web-1"] circle:last-of-type');
         await page.waitForTimeout(100);
         const on = await dimmed(page);
         const shown = Object.keys(on.hosts).filter(h => on.hosts[h] === 'shown').sort();

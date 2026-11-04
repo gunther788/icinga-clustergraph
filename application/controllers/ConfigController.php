@@ -1,22 +1,22 @@
 <?php
 
-namespace Icinga\Module\Clustergraph\Controllers;
+namespace Icinga\Module\Topologygraph\Controllers;
 
 use Icinga\Application\Config;
-use Icinga\Module\Clustergraph\Forms\ModuleconfigForm;
+use Icinga\Module\Topologygraph\Forms\ModuleconfigForm;
 use Icinga\Web\Controller;
 
 class ConfigController extends Controller
 {
     /**
-     * General configuration for Clustergraph
+     * General configuration for Topologygraph
      */
 
 
     public function indexAction()
     {
         $form = (new ModuleconfigForm())
-            ->setIniConfig(Config::module('clustergraph', "config"));
+            ->setIniConfig(Config::module('topologygraph', "config"));
 
         $form->handleRequest();
 

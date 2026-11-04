@@ -7,7 +7,7 @@ const {open, fixture, transform} = require('./harness');
 const REFRESH_MS = 15000;
 
 const snapshot = page => page.evaluate(() => {
-    const v = document.querySelector('.clustergraph-viewport');
+    const v = document.querySelector('.topologygraph-viewport');
     if (!v.dataset.id) v.dataset.id = String(Math.random());
     return {
         viewport: v.dataset.id,
@@ -15,7 +15,7 @@ const snapshot = page => page.evaluate(() => {
         red: [...v.querySelectorAll('svg a')]
             .filter(a => a.querySelector('circle:last-of-type').getAttribute('fill') === '#ff5566')
             .map(a => a.querySelector('text').textContent).sort(),
-        status: v.querySelector('.clustergraph-hint span').textContent
+        status: v.querySelector('.topologygraph-hint span').textContent
     };
 });
 

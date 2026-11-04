@@ -5,14 +5,14 @@
 <?php endif ?>
 <div class="content">
     <p>
-        Enter the config details for an API user with the required permissions to read the Zones and Endpoints from your
-        master node. Example permissions:
+        Enter the details of an Icinga 2 API user that may read hosts, dependencies and services. Without the
+        service permission the graph still works, but without service problem rings. Example:
     <pre>
 
-object ApiUser "CLUSTERGRAPH_USERNAME_HERE" {
+object ApiUser "TOPOLOGYGRAPH_USERNAME_HERE" {
   password = "SECURE_PASSWORD_HERE"
 
-  permissions = [ "objects/query/Zone", "objects/query/Endpoint", "objects/query/Host" ]
+  permissions = [ "objects/query/Host", "objects/query/Dependency", "objects/query/Service" ]
 }
 
         </pre>
