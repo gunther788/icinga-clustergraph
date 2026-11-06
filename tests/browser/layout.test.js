@@ -36,7 +36,7 @@ for (const [name, limits] of Object.entries(SAMPLES)) {
 test('hosts that are parents of the same children share one box', async () => {
     const {page, close} = await open({data: fixture('parents23')});
     try {
-        const boxes = await page.$$eval('.topologygraph-viewport svg rect', rects => rects.map(rect => {
+        const boxes = await page.$$eval('.topologygraph-viewport svg rect.topologygraph-box', rects => rects.map(rect => {
             const r = rect.getBoundingClientRect();
             return [...document.querySelectorAll('.topologygraph-viewport svg a')]
                 .filter(a => {

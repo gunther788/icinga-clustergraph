@@ -39,7 +39,7 @@ test('stays compact on a large screen', async () => {
     try {
         // Gaps between the side-by-side lists of boxes stay small
         const gaps = await page.evaluate(() => {
-            const rects = [...document.querySelectorAll('.topologygraph-viewport rect')].map(r => r.getBoundingClientRect());
+            const rects = [...document.querySelectorAll('.topologygraph-viewport rect.topologygraph-box')].map(r => r.getBoundingClientRect());
             const columns = [];
             rects.forEach(r => {
                 const column = columns.find(c => Math.abs(c.left - r.left) < 30 || Math.abs(c.right - r.right) < 30);

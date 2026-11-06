@@ -21,7 +21,7 @@ test('the ELK layout routes arrows around hosts and boxes', async () => {
         assert.ok(m.arrows > 0);
         assert.equal(m.throughBoxesOrLabels, 0, 'no arrow runs through a box or label');
         assert.equal(await page.$eval('.topologygraph-layout', s => s.value), 'elk');
-        assert.ok(await page.$$eval('.topologygraph-viewport svg rect', r => r.length) > 0, 'groups are still boxed');
+        assert.ok(await page.$$eval('.topologygraph-viewport svg rect.topologygraph-box', r => r.length) > 0, 'groups are still boxed');
         assert.deepEqual(errors, []);
     } finally {
         await close();
@@ -128,7 +128,7 @@ test('the hybrid layout wraps the tall column of boxes and keeps ELK routing', a
         assert.equal(m.shownAt, '100%', 'fits at full size (plain ELK needs 64% here)');
         assert.equal(m.throughBoxesOrLabels, 0, 'no arrow runs through a box or label');
         // The boxes of hosts with children sit in more than one column
-        const columns = await page.$$eval('.topologygraph-viewport svg rect', rects => {
+        const columns = await page.$$eval('.topologygraph-viewport svg rect.topologygraph-box', rects => {
             const rights = rects.filter(r => +r.getAttribute('height') > 60).map(r => Math.round(+r.getAttribute('x') + +r.getAttribute('width')));
             return new Set(rights).size;
         });

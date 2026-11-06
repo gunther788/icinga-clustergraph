@@ -160,7 +160,7 @@ function metrics(page) {
         return {
             hosts: svg.querySelectorAll('a').length,
             arrows: arrows.length,
-            boxes: svg.querySelectorAll('rect').length,
+            boxes: svg.querySelectorAll('rect.topologygraph-box').length,
             crossings,
             horizontal: arrows.filter(e => Math.abs(e.s.y - e.t.y) < 1).length,
             finite
@@ -212,7 +212,7 @@ function routeMetrics(page) {
             }
         }
         // Obstacles: boxes, and host labels outside boxes, in content coordinates
-        const obstacles = [...content.querySelectorAll('rect')].map(r => ({
+        const obstacles = [...content.querySelectorAll('rect.topologygraph-box')].map(r => ({
             x0: +r.getAttribute('x'), y0: +r.getAttribute('y'),
             x1: +r.getAttribute('x') + +r.getAttribute('width'), y1: +r.getAttribute('y') + +r.getAttribute('height')
         }));
