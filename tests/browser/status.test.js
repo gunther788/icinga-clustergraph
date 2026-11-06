@@ -52,6 +52,7 @@ const arrowsInto = page => page.evaluate(() => {
         (result[child.name] = result[child.name] || []).push({
             stroke: path.getAttribute('stroke'),
             opacity: +path.getAttribute('opacity'),
+            width: getComputedStyle(path).strokeWidth,
             marker: path.getAttribute('marker-end')
         });
     });
@@ -160,10 +161,13 @@ test('arrows to or from hosts outside the group are gray', async () => {
     const {page, errors, close} = await open({data});
     try {
         const a = await arrowsInto(page);
-        assert.ok(a['fw-1'].every(x => x.stroke === '#7f8792'), 'from a host outside the group: gray');
-        assert.ok(a['fw-2'].every(x => x.stroke === '#7f8792'));
+        assert.ok(a['fw-1'].every(x => x.stroke === '#adb3bc'), 'from a host outside the group: gray');
+        assert.ok(a['fw-2'].every(x => x.stroke === '#adb3bc'));
         assert.ok(a['lb-1'].every(x => x.stroke === '#00c3ed'), 'between hosts of the group: blue');
         assert.ok(a['db-1'].every(x => x.stroke === '#00c3ed'));
+        // Neither kind looks bolder: same width and opacity
+        const gray = a['fw-1'][0], blue = a['lb-1'][0];
+        assert.deepEqual([gray.width, gray.opacity], [blue.width, blue.opacity]);
         assert.deepEqual(errors, []);
     } finally {
         await close();
@@ -176,5 +180,51 @@ test('arrows to or from hosts outside the group are gray', async () => {
         assert.ok((await arrowsInto(down.page))['fw-1'].every(x => x.stroke === '#ff5566'), 'into a down host: red');
     } finally {
         await down.close();
+    }
+});
+
+test('hosts in a host group selected in the URL are drawn as members', async () => {
+    // db-1 is not in the configured group, but in "databases"; its parents
+    // web-1 and api-1 are in the configured group
+    const data = fixture('small');
+    data.nodes.forEach(n => { n.groups = n.synthetic ? ['synthetic'] : []; });
+    Object.assign(data.nodes.find(n => n.name === 'db-1'), {synthetic: false, groups: ['databases']});
+    const label = (page, name) => page.$eval(`.topologygraph-viewport a[href="#${name}"]`, a => ({
+        weight: a.querySelector('text').getAttribute('font-weight'),
+        dashed: a.querySelector('circle:last-of-type').getAttribute('stroke') !== 'none',
+        title: a.querySelector('title').textContent
+    }));
+
+    const plain = await open({data});
+    try {
+        const db = await label(plain.page, 'db-1');
+        assert.deepEqual([db.weight, db.dashed], ['normal', true], 'outside the configured group: faded');
+        assert.match(db.title, /not in the synthetic host group$/m);
+        assert.ok((await arrowsInto(plain.page))['db-1'].every(x => x.stroke === '#adb3bc'), 'arrows into it: gray');
+    } finally {
+        await plain.close();
+    }
+
+    const selected = await open({data, query: '?hostgroup=databases'});
+    try {
+        const db = await label(selected.page, 'db-1');
+        assert.deepEqual([db.weight, db.dashed], ['bold', false], 'in a selected group: drawn as a member');
+        assert.doesNotMatch(db.title, /not in the/);
+        assert.ok((await arrowsInto(selected.page))['db-1'].every(x => x.stroke === '#00c3ed'), 'arrows into it: blue');
+        // core-router is in neither group and isn't above db-1, so it isn't shown;
+        // a host above db-1 that is in neither group would still be faded
+        assert.deepEqual(selected.errors, []);
+    } finally {
+        await selected.close();
+    }
+
+    // A host in neither group still says so
+    Object.assign(data.nodes.find(n => n.name === 'web-1'), {synthetic: false, groups: []});
+    const both = await open({data, query: '?hostgroup=databases'});
+    try {
+        assert.match((await label(both.page, 'web-1')).title, /not in the synthetic host group or the selected groups/);
+        assert.ok((await arrowsInto(both.page))['db-1'].some(x => x.stroke === '#adb3bc'), 'its arrow is gray');
+    } finally {
+        await both.close();
     }
 });
