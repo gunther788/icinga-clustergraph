@@ -996,23 +996,26 @@
     }
 
     // What is shown lives in the page URL, so it can be bookmarked or shared:
-    // ?host=a&host=b for a subset, and ?services=notified to leave out services
-    // with notifications disabled
+    // ?host=a&host=b and/or ?hostgroup=g for a subset, ?services=notified to
+    // leave out services with notifications disabled, ?layout=elk|hybrid
     const readUrlState = () => {
         const params = new URLSearchParams(window.location.search);
         return {
             hosts: params.getAll("host"),
+            hostgroups: params.getAll("hostgroup"),
             notifiedOnly: params.get("services") === "notified",
             layout: ["elk", "hybrid"].includes(params.get("layout")) ? params.get("layout") : "standard"
         };
     };
     const writeUrlState = (state, container) => {
         const url = new URL(window.location.href);
-        // Always written in the same order: hosts first, then the option
+        // Always written in the same order: hosts, host groups, then options
         url.searchParams.delete("host");
+        url.searchParams.delete("hostgroup");
         url.searchParams.delete("services");
         url.searchParams.delete("layout");
         state.hosts.forEach(name => url.searchParams.append("host", name));
+        (state.hostgroups || []).forEach(name => url.searchParams.append("hostgroup", name));
         if (state.notifiedOnly) url.searchParams.append("services", "notified");
         if (state.layout && state.layout !== "standard") url.searchParams.append("layout", state.layout);
         if (url.href !== window.location.href) {
@@ -1270,17 +1273,33 @@
             let fullData = {nodes: [], links: []};
             let hostGroup = "synthetic"; // from the module settings, sent with the data
             const urlState = readUrlState();
-            let selected = urlState.hosts; // host names; empty means all hosts
+            let selected = urlState.hosts; // ticked host names
+            let selectedGroups = urlState.hostgroups; // ticked host groups
+            // A ticked group counts as ticking every drawn host in it
+            const selectionNames = () => {
+                const names = new Set(selected);
+                if (selectedGroups.length) {
+                    fullData.nodes.forEach(n => {
+                        if ((n.groups || []).some(group => selectedGroups.includes(group))) names.add(n.name);
+                    });
+                }
+                return [...names];
+            };
             let notifiedOnly = urlState.notifiedOnly; // ignore services with notifications disabled
             let layout = urlState.layout; // "standard", "elk" or "hybrid"
-            const updateUrl = () => writeUrlState({hosts: selected, notifiedOnly, layout}, container);
+            const updateUrl = () => writeUrlState({hosts: selected, hostgroups: selectedGroups, notifiedOnly, layout}, container);
             // The service summary to show: all services, or only those with
             // notifications enabled (falls back if the server doesn't send it)
             const serviceSummary = d => notifiedOnly && d.services_notified !== undefined ? d.services_notified : d.services;
             let drawn = null; // {structure, update(data)} for what is on screen
             let laidOutFor = {width: 0, height: 0};
 
-            const visibleData = () => selected.length ? subsetAbove(fullData, selected) : fullData;
+            // Nothing ticked: everything; otherwise the ticked hosts (and the
+            // hosts in ticked groups) and everything above them
+            const visibleData = () => {
+                const names = selectionNames();
+                return names.length ? subsetAbove(fullData, names) : fullData;
+            };
 
             // Re-layouts animate from the previous positions (unless the
             // viewer asked their system for reduced motion)
@@ -1568,8 +1587,8 @@
             const controls = document.createElement("div");
             controls.className = "topologygraph-controls";
 
-            // Subset picker: tick one or more hosts without children to show
-            // only them and everything above them
+            // Subset picker: tick host groups and/or hosts without children to
+            // show only them and everything above them
             const pickerButton = document.createElement("button");
             pickerButton.type = "button";
             pickerButton.textContent = "All hosts \u25be";
@@ -1580,28 +1599,56 @@
             panel.hidden = true;
             const filter = document.createElement("input");
             filter.type = "search";
-            filter.placeholder = "Filter hosts";
+            filter.placeholder = "Filter groups and hosts";
             const showAll = document.createElement("button");
             showAll.type = "button";
             showAll.textContent = "Show all";
             const panelHead = document.createElement("div");
             panelHead.className = "topologygraph-picker-head";
             panelHead.append(filter, showAll);
+            const heading = text => {
+                const h = document.createElement("div");
+                h.className = "topologygraph-picker-heading";
+                h.textContent = text;
+                return h;
+            };
+            const groupHeading = heading("Host groups");
+            const groupList = document.createElement("div");
+            groupList.className = "topologygraph-picker-list topologygraph-picker-groups";
+            const hostHeading = heading("Hosts");
             const list = document.createElement("div");
             list.className = "topologygraph-picker-list";
-            panel.append(panelHead, list);
+            const lists = document.createElement("div");
+            lists.className = "topologygraph-picker-lists";
+            lists.append(groupHeading, groupList, hostHeading, list);
+            panel.append(panelHead, lists);
 
             const applySelection = () => {
-                pickerButton.textContent = selected.length === 0 ? "All hosts \u25be"
-                    : selected.length === 1 ? (fullData.nodes.find(n => n.name === selected[0]) || {label: selected[0]}).label + " \u25be"
-                    : selected.length + " hosts \u25be";
+                const parts = [];
+                if (selectedGroups.length === 1) parts.push(selectedGroups[0]);
+                if (selectedGroups.length > 1) parts.push(selectedGroups.length + " groups");
+                if (selected.length === 1) parts.push((fullData.nodes.find(n => n.name === selected[0]) || {label: selected[0]}).label);
+                if (selected.length > 1) parts.push(selected.length + " hosts");
+                pickerButton.textContent = (parts.length ? parts.join(", ") : "All hosts") + " \u25be";
                 list.querySelectorAll("input").forEach(box => box.checked = selected.includes(box.value));
+                groupList.querySelectorAll("input").forEach(box => box.checked = selectedGroups.includes(box.value));
                 updateUrl();
             };
-            const choose = names => {
+            const choose = (names, groups) => {
                 selected = names;
+                selectedGroups = groups;
                 applySelection();
                 draw(null);
+            };
+            const ticked = container => [...container.querySelectorAll("input:checked")].map(box => box.value);
+            const checkboxRow = (value, label, filterText) => {
+                const row = document.createElement("label");
+                const box = document.createElement("input");
+                box.type = "checkbox";
+                box.value = value;
+                row.append(box, " " + label);
+                row.dataset.filter = filterText.toLowerCase();
+                return row;
             };
 
             let pickerFor = null;
@@ -1610,33 +1657,32 @@
                 if (structure !== pickerFor) {
                     pickerFor = structure;
                     const hosts = hostsWithoutChildren(fullData);
-                    list.replaceChildren(...hosts.map(n => {
-                        const row = document.createElement("label");
-                        const box = document.createElement("input");
-                        box.type = "checkbox";
-                        box.value = n.name;
-                        row.append(box, " " + n.label);
-                        row.dataset.filter = (n.label + " " + n.name).toLowerCase();
-                        return row;
-                    }));
-                    pickerButton.hidden = !hosts.length;
+                    list.replaceChildren(...hosts.map(n => checkboxRow(n.name, n.label, n.label + " " + n.name)));
+                    // Every group any drawn host is in
+                    const groups = [...new Set([].concat(...fullData.nodes.map(n => n.groups || [])))]
+                        .sort((a, b) => d3.ascending(a, b));
+                    groupList.replaceChildren(...groups.map(group => checkboxRow(group, group, group)));
+                    groupHeading.hidden = groupList.hidden = !groups.length;
+                    pickerButton.hidden = !hosts.length && !groups.length;
                     filterList();
                 }
-                // Drop selected hosts that are gone or now have children
-                const available = new Set([...list.querySelectorAll("input")].map(box => box.value));
-                selected = selected.filter(name => available.has(name));
+                // Drop selected hosts and groups that are gone (or hosts that
+                // now have children)
+                const available = container => new Set([...container.querySelectorAll("input")].map(box => box.value));
+                const hostNames = available(list), groupNames = available(groupList);
+                selected = selected.filter(name => hostNames.has(name));
+                selectedGroups = selectedGroups.filter(name => groupNames.has(name));
                 applySelection();
             };
             const filterList = () => {
                 const text = filter.value.trim().toLowerCase();
-                list.querySelectorAll("label").forEach(row => row.hidden = !!text && !row.dataset.filter.includes(text));
+                lists.querySelectorAll("label").forEach(row => row.hidden = !!text && !row.dataset.filter.includes(text));
             };
 
-            list.addEventListener("change", () => {
-                choose([...list.querySelectorAll("input:checked")].map(box => box.value));
-            });
+            list.addEventListener("change", () => choose(ticked(list), selectedGroups));
+            groupList.addEventListener("change", () => choose(selected, ticked(groupList)));
             filter.addEventListener("input", filterList);
-            showAll.addEventListener("click", () => choose([]));
+            showAll.addEventListener("click", () => choose([], []));
             const closePanel = () => { panel.hidden = true; };
             pickerButton.addEventListener("click", event => {
                 event.preventDefault();

@@ -117,6 +117,7 @@ check('build: service summary attached', $byName['probe-a']['services']['worst_u
 check('build: host without services gets an empty summary', $byName['db-1']['services']['total'], 0);
 check('build: link to the host page is URL-encoded', $byName['probe-a']['link'], '/icingaweb2/icingadb/host?name=probe-a');
 check('build: links passed through', $graph['links'], $selection['links']);
+check('build: host groups passed through', [$byName['probe-b']['groups'], $byName['db-1']['groups']], [['synthetic', 'other'], []]);
 
 $withoutServices = GraphBuilder::build($selection, $hosts, null, '/x?host=');
 check('build: services null when they could not be fetched', $withoutServices['nodes'][0]['services'], null);
