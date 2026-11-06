@@ -15,7 +15,7 @@ const snapshot = page => page.evaluate(() => {
         red: [...v.querySelectorAll('svg a')]
             .filter(a => a.querySelector('circle:last-of-type').getAttribute('fill') === '#ff5566')
             .map(a => a.querySelector('text').textContent).sort(),
-        status: v.querySelector('.topologygraph-hint span').textContent
+        status: v.querySelector('.topologygraph-status').textContent
     };
 });
 

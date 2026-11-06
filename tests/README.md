@@ -26,3 +26,20 @@ npm test
 `npm run test:php` and `npm run test:browser` run one set each.
 
 The layout tests have limits for crossing and horizontal arrows on each sample, in `browser/layout.test.js`. A failure there means a change made the layout worse. When the layout improves, tighten the limits.
+
+## Comparing layout engines
+
+`npm run compare` prints measurements for the standard and ELK layouts on each sample graph:
+
+- crossing arrows;
+- arrows through boxes or labels;
+- level arrows;
+- the drawing's size and the zoom it fits at.
+
+To compare them on your own hosts, save the output of `…/topologygraph/index/data` (while logged in to Icinga Web) to a file and pass it:
+
+```bash
+npm run compare -- my-graph.json
+npm run compare -- my-graph.json --size=1920x1080
+```
+
