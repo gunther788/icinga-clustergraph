@@ -228,3 +228,27 @@ test('hosts in a host group selected in the URL are drawn as members', async () 
         await both.close();
     }
 });
+
+test('dependencies between two hosts outside the group are drawn, in gray', async () => {
+    // dmz-1 and backend-1 are outside the group, children of group hosts, and
+    // backend-1 depends on dmz-1
+    const data = fixture('small');
+    data.nodes.push(
+        {name: 'dmz-1', label: 'dmz-1', state: 0, last_check: 1, synthetic: false, link: '#dmz-1'},
+        {name: 'backend-1', label: 'backend-1', state: 0, last_check: 1, synthetic: false, link: '#backend-1'}
+    );
+    data.links.push(
+        {source: 'web-1', target: 'dmz-1'},
+        {source: 'api-1', target: 'backend-1'},
+        {source: 'dmz-1', target: 'backend-1'}
+    );
+    const {page, errors, close} = await open({data});
+    try {
+        const a = await arrowsInto(page);
+        assert.ok(a['backend-1'] && a['backend-1'].length === 2, 'both arrows into backend-1 are drawn');
+        assert.ok(a['backend-1'].every(x => x.stroke === '#adb3bc'), 'gray');
+        assert.deepEqual(errors, []);
+    } finally {
+        await close();
+    }
+});

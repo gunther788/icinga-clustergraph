@@ -94,6 +94,33 @@ check('services failing: still drawn', count($withoutServices['nodes']), 3);
 check('services failing: marked unavailable', $withoutServices['nodes'][0]['services'], null);
 check('services failing: error reported', $reported, '403 Forbidden');
 
+// Dependencies between two drawn hosts outside the group (e.g. from a
+// vars.parents apply rule between a DMZ host and a backend host)
+$requests = [];
+$dmz = [
+    'hosts' => $answers['hosts'],
+    'dependencies' => function ($body) {
+        if (strpos($body['filter'], 'dependency.parent_host_name in names && dependency.child_host_name in names') !== false) {
+            // Asked only about the hosts outside the group
+            return [
+                ['attrs' => ['parent_host_name' => 'dmz-1', 'child_host_name' => 'backend-1', 'child_service_name' => '']],
+                ['attrs' => ['parent_host_name' => 'dmz-1', 'child_host_name' => 'elsewhere', 'child_service_name' => '']]
+            ];
+        }
+        return [
+            ['attrs' => ['parent_host_name' => 'probe-a', 'child_host_name' => 'dmz-1', 'child_service_name' => '']],
+            ['attrs' => ['parent_host_name' => 'probe-b', 'child_host_name' => 'backend-1', 'child_service_name' => '']]
+        ];
+    },
+    'services' => []
+];
+$graph = GraphSource::fetch(fakeApi($dmz, $requests), 'web-checks', '/host?name=');
+check('outside links: an extra dependency request', array_column($requests, 'kind'),
+    ['hosts', 'dependencies', 'hosts', 'dependencies', 'services']);
+check('outside links: asked about the outside hosts only', $requests[3]['vars'], ['names' => ['dmz-1', 'backend-1']]);
+check('outside links: the line between them is added', in_array(['source' => 'dmz-1', 'target' => 'backend-1'], $graph['links'], true), true);
+check('outside links: no hosts are added', count($graph['nodes']), 4);
+
 // Hosts failing is an error for the caller
 $thrown = null;
 try {

@@ -15,7 +15,7 @@ The upstream module asks the Icinga 2 API for zones and endpoints and draws them
 
 - **Data:** `IndexController::dataAction()` asks the API for hosts, `Dependency` objects and services instead of
   zones. It returns every host in the configured host group, plus any direct parent or child of one that is outside
-  the group, and the parent → child links between them. Only host-to-host dependencies are used; service
+  the group, and the parent → child links between all of these, including between two hosts outside the group. Only host-to-host dependencies are used; service
   dependencies are ignored.
 - **Drawing:** `public/js/module.js` replaces the zone tree with a layered dependency graph built with D3, described
   below.
@@ -196,12 +196,14 @@ Font size and spacing are constants (`FONT_SIZE` and `BASE`) near the top of `pu
 
 ## Load on the Icinga API
 
-Each update makes up to four small requests, each filtered on the Icinga side:
+Each update makes up to five small requests, each filtered on the Icinga side:
 
 1. the hosts in the group;
 2. the host-to-host dependencies that touch them;
 3. the hosts outside the group at the other end of those dependencies;
-4. the services of all drawn hosts.
+4. the dependencies between those outside hosts, for example between a host in the DMZ and one in the backend. This
+   adds lines between hosts that are already drawn, never more hosts;
+5. the services of all drawn hosts.
 
 The finished graph is cached on the Icinga Web server for half the refresh interval, in a folder in the system's
 temporary directory. Several people with the page open therefore share one set of requests. Failed requests are
