@@ -48,16 +48,17 @@ function fixture(name) {
  * @param {string} [options.query]   Query string for the page URL, e.g. "?host=a"
  * @param {object} [options.viewport] Browser window size
  * @param {boolean} [options.clock]  Install Playwright's fake clock before loading
+ * @param {boolean} [options.elkFail] Make the ELK library fail to load
  * @returns {Promise<{browser, page, server, errors, close}>}
  */
-async function open({data, query = '', viewport = {width: 1280, height: 720}, clock = false}) {
+async function open({data, query = '', viewport = {width: 1280, height: 720}, clock = false, elkFail = false}) {
     const css = await moduleCss();
     const browser = await chromium.launch();
     const page = await browser.newPage({viewport});
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
 
-    const server = {data, fail: false, fetches: 0};
+    const server = {data, fail: false, fetches: 0, elkFail, elkRequests: 0};
     const html = `<!doctype html><html><head><meta charset="utf-8"><style>${ICINGA_CSS}${css}</style></head><body>
         <div id="header"></div><div id="sidebar"></div>
         <div class="container" id="col1" data-icinga-url="${PAGE}">
@@ -80,6 +81,14 @@ async function open({data, query = '', viewport = {width: 1280, height: 720}, cl
             server.fetches++;
             if (server.fail) return route.fulfill({status: 500, body: 'failed'});
             return route.fulfill({contentType: 'application/json', body: JSON.stringify(server.data)});
+        }
+        if (url.pathname === PAGE + '/index/elk') {
+            server.elkRequests = (server.elkRequests || 0) + 1;
+            if (server.elkFail) return route.fulfill({status: 404, body: 'not found'});
+            return route.fulfill({
+                contentType: 'application/javascript',
+                body: fs.readFileSync(path.join(ROOT, 'public/js/vendor/elkjs/elk.bundled.js'))
+            });
         }
         if (url.pathname === '/d3.js') {
             return route.fulfill({
@@ -156,9 +165,85 @@ function metrics(page) {
     });
 }
 
+/**
+ * Measurements along the drawn arrows (sampled along each path, so they work
+ * for curves and for routed arrows alike): pairs of arrows that cross,
+ * arrows passing through a box or host label they don't start or end at,
+ * arrows that are perfectly level, the drawing's size and the zoom it is
+ * shown at.
+ */
+function routeMetrics(page) {
+    return page.evaluate(() => {
+        const svg = document.querySelector('.topologygraph-viewport svg');
+        const content = svg.querySelector('g > g');
+        const paths = [...content.querySelectorAll('path[marker-end]')];
+        const routes = paths.map(path => {
+            const length = path.getTotalLength();
+            const steps = Math.max(8, Math.ceil(length / 6));
+            const points = [];
+            for (let i = 0; i <= steps; i++) {
+                const p = path.getPointAtLength(length * i / steps);
+                points.push({x: p.x, y: p.y});
+            }
+            return points;
+        });
+        const near = (a, b, d) => Math.abs(a.x - b.x) < d && Math.abs(a.y - b.y) < d;
+        const segmentsCross = (p1, p2, p3, p4) => {
+            const d = (a, b, c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+            const d1 = d(p3, p4, p1), d2 = d(p3, p4, p2), d3 = d(p1, p2, p3), d4 = d(p1, p2, p4);
+            return ((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0)) && d1 && d2 && d3 && d4;
+        };
+        let crossings = 0;
+        for (let i = 0; i < routes.length; i++) {
+            for (let j = i + 1; j < routes.length; j++) {
+                const a = routes[i], b = routes[j];
+                const ends = [a[0], a[a.length - 1], b[0], b[b.length - 1]];
+                let crossed = false;
+                for (let s = 1; s < a.length && !crossed; s++) {
+                    for (let t = 1; t < b.length && !crossed; t++) {
+                        if (segmentsCross(a[s - 1], a[s], b[t - 1], b[t])
+                            && !ends.some(e => near(e, a[s], 6) || near(e, b[t], 6))) crossed = true;
+                    }
+                }
+                if (crossed) crossings++;
+            }
+        }
+        // Obstacles: boxes, and host labels outside boxes, in content coordinates
+        const obstacles = [...content.querySelectorAll('rect')].map(r => ({
+            x0: +r.getAttribute('x'), y0: +r.getAttribute('y'),
+            x1: +r.getAttribute('x') + +r.getAttribute('width'), y1: +r.getAttribute('y') + +r.getAttribute('height')
+        }));
+        const inBox = (x, y) => obstacles.some(o => x > o.x0 && x < o.x1 && y > o.y0 && y < o.y1);
+        content.querySelectorAll('a').forEach(a => {
+            const m = /translate\(([-\d.e]+),([-\d.e]+)\)/.exec(a.getAttribute('transform'));
+            const x = +m[1], y = +m[2];
+            if (inBox(x, y)) return;
+            const box = a.querySelector('text').getBBox();
+            obstacles.push({x0: x + box.x, y0: y + box.y + 2, x1: x + 6, y1: y + box.y + box.height - 2});
+        });
+        let hits = 0;
+        routes.forEach(route => {
+            const start = route[0], end = route[route.length - 1];
+            obstacles.forEach(o => {
+                const own = [start, end].some(p => p.x >= o.x0 - 8 && p.x <= o.x1 + 8 && p.y >= o.y0 - 2 && p.y <= o.y1 + 2);
+                if (own) return;
+                if (route.some(p => p.x > o.x0 + 1 && p.x < o.x1 - 1 && p.y > o.y0 + 1 && p.y < o.y1 - 1)) hits++;
+            });
+        });
+        const level = routes.filter(r => r.every(p => Math.abs(p.y - r[0].y) < 1)).length;
+        const box = content.getBBox();
+        const t = /scale\(([-\d.e]+)\)/.exec(svg.querySelector('g').getAttribute('transform') || '');
+        return {
+            arrows: routes.length, crossings, throughBoxesOrLabels: hits, level,
+            size: Math.round(box.width) + 'x' + Math.round(box.height),
+            shownAt: t ? Math.round(+t[1] * 100) + '%' : '100%'
+        };
+    });
+}
+
 /** Names of the hosts currently drawn */
 function drawnHosts(page) {
     return page.$$eval('.topologygraph-viewport svg a text', texts => texts.map(t => t.textContent).sort());
 }
 
-module.exports = {open, settle, fixture, transform, metrics, drawnHosts, ORIGIN, PAGE};
+module.exports = {open, settle, fixture, transform, metrics, routeMetrics, drawnHosts, ORIGIN, PAGE};

@@ -223,11 +223,7 @@
         const rightmost = new Set(columns[0]);
 
         // Measure labels so each column leaves room for its text
-        const ctx = document.createElement("canvas").getContext("2d");
-        const labelWidth = new Map(nodes.map(n => {
-            ctx.font = (n.synthetic ? "bold" : "italic") + " " + FONT_SIZE + "px sans-serif";
-            return [n.name, ctx.measureText(n.label).width];
-        }));
+        const labelWidth = measureLabels(nodes);
         const widest = names => Math.max(0, ...names.map(name => labelWidth.get(name)));
 
         // Rightmost hosts grouped by their exact set of children
@@ -691,6 +687,191 @@
         return {coords: geo.coords, boxes: geo.boxes, edges: geo.edges, width: geo.width, height: size.height, top: size.top};
     }
 
+    // Label widths as drawn (bold for group members, italic for the rest)
+    function measureLabels(nodes) {
+        const ctx = document.createElement("canvas").getContext("2d");
+        return new Map(nodes.map(n => {
+            ctx.font = (n.synthetic ? "bold" : "italic") + " " + FONT_SIZE + "px sans-serif";
+            return [n.name, ctx.measureText(n.label).width];
+        }));
+    }
+
+    // ELK (Eclipse Layout Kernel, elkjs) is large, so it isn't part of the
+    // script bundle Icinga Web loads on every page: the module serves it from
+    // .../index/elk and it is loaded only when the ELK layout is chosen
+    let elkLoading = null;
+    function loadElk() {
+        if (window.ELK) return Promise.resolve(window.ELK);
+        if (!elkLoading) {
+            elkLoading = new Promise((resolve, reject) => {
+                const script = document.createElement("script");
+                script.src = window.location.pathname.replace(/\/+$/, "") + "/index/elk";
+                script.onload = () => window.ELK ? resolve(window.ELK) : reject(new Error("ELK did not load"));
+                script.onerror = () => {
+                    elkLoading = null;
+                    reject(new Error("could not load ELK"));
+                };
+                document.head.appendChild(script);
+            });
+        }
+        return elkLoading;
+    }
+
+    /**
+     * Lay out the graph with ELK's layered algorithm instead of computeLayout.
+     *
+     * Parents are on the right (direction LEFT). Hosts without parents are
+     * grouped by their exact set of children, as in the standard layout, and
+     * each group is one ELK node the size of its box, so a group's arrows leave
+     * from a single point. Every host has fixed ports: arrows leave from the
+     * left end of the label and arrive at the dot. ELK routes the arrows
+     * orthogonally around hosts and boxes.
+     *
+     * Resolves to the same shape as computeLayout: {coords, boxes, edges,
+     * width, height, top}; each edge also carries its route in `points`.
+     */
+    function computeElkLayout(nodes, links) {
+        return loadElk().then(ELK => {
+            const ROW = BASE.rowHeight;
+            const DOT_PAD = 4; // space right of a dot
+            const labelWidth = measureLabels(nodes);
+            const names = new Set(nodes.map(n => n.name));
+            const validLinks = links.filter(l => names.has(l.source) && names.has(l.target) && l.source !== l.target);
+            const childrenOf = new Map(nodes.map(n => [n.name, []]));
+            const hasParent = new Set();
+            validLinks.forEach(l => {
+                childrenOf.get(l.source).push(l.target);
+                hasParent.add(l.target);
+            });
+
+            // Hosts without parents, grouped by their children
+            const groupByKey = new Map();
+            nodes.filter(n => !hasParent.has(n.name)).forEach(n => {
+                const key = childrenOf.get(n.name).slice().sort().join("\0");
+                if (!groupByKey.has(key)) {
+                    groupByKey.set(key, {id: "group:" + groupByKey.size, names: [], children: childrenOf.get(n.name).slice()});
+                }
+                groupByKey.get(key).names.push(n.name);
+            });
+            const groups = [...groupByKey.values()];
+            const groupOf = new Map();
+            const groupById = new Map(groups.map(group => [group.id, group]));
+            groups.forEach(group => {
+                group.names.sort((a, b) => d3.ascending(a, b));
+                group.names.forEach(name => groupOf.set(name, group));
+            });
+            const widest = list => Math.max(0, ...list.map(name => labelWidth.get(name)));
+            const port = (id, side, x, y) => ({id, x, y, width: 0, height: 0, layoutOptions: {"elk.port.side": side}});
+
+            const children = [];
+            groups.forEach(group => {
+                const width = BOX_PAD_X + widest(group.names) + LABEL_OFFSET + 5 + BOX_PAD_X;
+                const height = group.names.length * ROW + 4;
+                children.push({
+                    id: group.id, width, height,
+                    layoutOptions: {"elk.portConstraints": "FIXED_POS"},
+                    ports: [port(group.id + ":out", "WEST", 0, height / 2)]
+                });
+            });
+            nodes.filter(n => hasParent.has(n.name)).forEach(n => {
+                const width = labelWidth.get(n.name) + LABEL_OFFSET + 5 + DOT_PAD;
+                children.push({
+                    id: n.name, width, height: ROW,
+                    layoutOptions: {"elk.portConstraints": "FIXED_POS"},
+                    ports: [port(n.name + ":out", "WEST", 0, ROW / 2), port(n.name + ":in", "EAST", width, ROW / 2)]
+                });
+            });
+
+            // One arrow per parent and child; a group's members share theirs
+            const edges = new Map();
+            validLinks.forEach(l => {
+                const from = groupOf.has(l.source) ? groupOf.get(l.source).id : l.source;
+                const id = from + "->" + l.target;
+                if (!edges.has(id)) edges.set(id, {id, sources: [from + ":out"], targets: [l.target + ":in"], child: l.target, from});
+            });
+
+            const graph = {
+                id: "root",
+                layoutOptions: {
+                    "elk.algorithm": "layered",
+                    "elk.direction": "LEFT",
+                    "elk.edgeRouting": "ORTHOGONAL",
+                    "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
+                    "elk.layered.spacing.nodeNodeBetweenLayers": "60",
+                    "elk.layered.spacing.edgeNodeBetweenLayers": "12",
+                    "elk.spacing.nodeNode": "8",
+                    "elk.spacing.edgeNode": "8",
+                    "elk.spacing.edgeEdge": "6",
+                    "elk.separateConnectedComponents": "true",
+                    "elk.spacing.componentComponent": "24",
+                    "elk.padding": "[top=" + PADDING + ",left=" + PADDING + ",bottom=" + PADDING + ",right=" + PADDING + "]"
+                },
+                children,
+                edges: [...edges.values()].map(e => ({id: e.id, sources: e.sources, targets: e.targets}))
+            };
+
+            return new ELK().layout(graph).then(result => {
+                const placed = new Map(result.children.map(c => [c.id, c]));
+                const coords = new Map();
+                const boxes = [];
+                groups.forEach(group => {
+                    const box = placed.get(group.id);
+                    const dotX = box.x + box.width - BOX_PAD_X - 5;
+                    group.names.forEach((name, i) => coords.set(name, {x: dotX, y: box.y + 2 + ROW / 2 + i * ROW}));
+                    boxes.push({
+                        names: group.names, children: group.children,
+                        x0: box.x, x1: box.x + box.width, y0: box.y, y1: box.y + box.height
+                    });
+                });
+                nodes.filter(n => hasParent.has(n.name)).forEach(n => {
+                    const box = placed.get(n.name);
+                    coords.set(n.name, {x: box.x + labelWidth.get(n.name) + LABEL_OFFSET, y: box.y + ROW / 2});
+                });
+
+                const routed = new Map((result.edges || []).map(e => [e.id, e]));
+                const drawnEdges = [...edges.values()].map(e => {
+                    const section = (routed.get(e.id).sections || [])[0];
+                    const dot = coords.get(e.child);
+                    const points = section
+                        ? [section.startPoint, ...(section.bendPoints || []), section.endPoint]
+                        : [{x: dot.x + 30, y: dot.y}];
+                    // Finish at the dot (the port sits just right of it)
+                    points.push({x: dot.x, y: dot.y});
+                    return {
+                        source: points[0],
+                        target: dot,
+                        child: e.child,
+                        // A group's arrow belongs to all of its members
+                        parents: groupById.has(e.from) ? groupById.get(e.from).names : [e.from],
+                        points
+                    };
+                });
+
+                return {coords, boxes, edges: drawnEdges, width: result.width, height: result.height, top: 0};
+            });
+        });
+    }
+
+    // An orthogonal route as an SVG path with rounded corners
+    function roundedPath(points, radius = 6) {
+        let d = "M" + points[0].x + "," + points[0].y;
+        for (let i = 1; i < points.length - 1; i++) {
+            const prev = points[i - 1], at = points[i], next = points[i + 1];
+            const inLength = Math.hypot(at.x - prev.x, at.y - prev.y);
+            const outLength = Math.hypot(next.x - at.x, next.y - at.y);
+            const r = Math.min(radius, inLength / 2, outLength / 2);
+            if (r < 0.5) {
+                d += "L" + at.x + "," + at.y;
+                continue;
+            }
+            const before = {x: at.x - (at.x - prev.x) / inLength * r, y: at.y - (at.y - prev.y) / inLength * r};
+            const after = {x: at.x + (next.x - at.x) / outLength * r, y: at.y + (next.y - at.y) / outLength * r};
+            d += "L" + before.x + "," + before.y + "Q" + at.x + "," + at.y + " " + after.x + "," + after.y;
+        }
+        const last = points[points.length - 1];
+        return d + "L" + last.x + "," + last.y;
+    }
+
     /**
      * Hosts without children, for the subset picker, sorted by label.
      */
@@ -736,15 +917,21 @@
     // with notifications disabled
     const readUrlState = () => {
         const params = new URLSearchParams(window.location.search);
-        return {hosts: params.getAll("host"), notifiedOnly: params.get("services") === "notified"};
+        return {
+            hosts: params.getAll("host"),
+            notifiedOnly: params.get("services") === "notified",
+            layout: params.get("layout") === "elk" ? "elk" : "standard"
+        };
     };
     const writeUrlState = (state, container) => {
         const url = new URL(window.location.href);
         // Always written in the same order: hosts first, then the option
         url.searchParams.delete("host");
         url.searchParams.delete("services");
+        url.searchParams.delete("layout");
         state.hosts.forEach(name => url.searchParams.append("host", name));
         if (state.notifiedOnly) url.searchParams.append("services", "notified");
+        if (state.layout === "elk") url.searchParams.append("layout", "elk");
         if (url.href !== window.location.href) {
             // Replace rather than push: Icinga keeps its own history entries,
             // and its state object is kept as it is
@@ -962,7 +1149,8 @@
             const urlState = readUrlState();
             let selected = urlState.hosts; // host names; empty means all hosts
             let notifiedOnly = urlState.notifiedOnly; // ignore services with notifications disabled
-            const updateUrl = () => writeUrlState({hosts: selected, notifiedOnly}, container);
+            let layout = urlState.layout; // "standard" or "elk"
+            const updateUrl = () => writeUrlState({hosts: selected, notifiedOnly, layout}, container);
             // The service summary to show: all services, or only those with
             // notifications enabled (falls back if the server doesn't send it)
             const serviceSummary = d => notifiedOnly && d.services_notified !== undefined ? d.services_notified : d.services;
@@ -971,21 +1159,52 @@
 
             const visibleData = () => selected.length ? subsetAbove(fullData, selected) : fullData;
 
+            // Re-layouts animate from the previous positions (unless the
+            // viewer asked their system for reduced motion)
+            const ANIMATE_MS = 450;
+            const reducedMotion = () => !!window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+            let previous = null; // {coords, top} of the drawing on screen
+            const smoothLink = d3.linkHorizontal().x(p => p.x).y(p => p.y);
+            let drawToken = 0;   // a newer draw() supersedes one still waiting for ELK
+
             const draw = view => {
+                const token = ++drawToken;
                 const data = visibleData();
                 const nodes = (data.nodes || []).map(n => Object.assign({}, n));
                 const links = data.links || [];
-                content.selectAll("*").remove();
                 emptyMessage.hidden = nodes.length > 0;
                 emptyMessage.textContent = `No hosts found in the "${hostGroup}" host group.`;
                 laidOutFor = {width: viewport.clientWidth, height: viewport.clientHeight};
                 const area = drawingArea();
                 if (!nodes.length) {
+                    content.selectAll("*").remove();
+                    previous = null;
                     drawn = {structure: structureOf(data), update: () => {}, restyle: () => {}};
                     return;
                 }
 
-                const geo = computeLayout(nodes, links, area);
+                const standard = () => computeLayout(nodes, links, area);
+                if (layout === "elk") {
+                    // The current drawing stays until ELK has finished
+                    computeElkLayout(nodes, links).then(geo => {
+                        if (token !== drawToken || !viewport.isConnected) return;
+                        layoutNote.textContent = "";
+                        render(geo, nodes, links, data, view);
+                    }).catch(error => {
+                        if (token !== drawToken || !viewport.isConnected) return;
+                        layoutNote.textContent = "ELK layout failed (" + error.message + "), using the standard layout \u00b7 ";
+                        render(standard(), nodes, links, data, view);
+                    });
+                } else {
+                    layoutNote.textContent = "";
+                    render(standard(), nodes, links, data, view);
+                }
+            };
+
+            const render = (geo, nodes, links, data, view) => {
+                const animate = previous !== null && !reducedMotion();
+                const before = previous;
+                content.selectAll("*").remove();
                 width = geo.width;
                 height = geo.height;
                 content.attr("transform", `translate(0,${-geo.top})`);
@@ -1023,9 +1242,9 @@
                     .selectAll("path")
                     .data(geo.edges)
                     .join("path")
-                    .attr("d", d3.linkHorizontal()
-                        .x(p => p.x)
-                        .y(p => p.y));
+                    // ELK routes arrows around hosts (points); the standard
+                    // layout draws a smooth curve between the two ends
+                    .attr("d", e => e.points ? roundedPath(e.points) : smoothLink(e));
 
                 const node = content.append("g")
                     .selectAll("a")
@@ -1033,7 +1252,9 @@
                     .join("a")
                     .attr("href", d => d.link)
                     .attr("transform", d => {
-                        const p = geo.coords.get(d.name);
+                        // When animating, start where the host was before
+                        const old = animate && before.coords.get(d.name);
+                        const p = old ? {x: old.x, y: old.y - before.top + geo.top} : geo.coords.get(d.name);
                         return `translate(${p.x},${p.y})`;
                     });
 
@@ -1163,6 +1384,29 @@
                     restyle: applyStates
                 };
 
+                // States may have been updated while ELK was working
+                drawn.update(fullData);
+
+                if (animate) {
+                    const finalPosition = d => {
+                        const p = geo.coords.get(d.name);
+                        return `translate(${p.x},${p.y})`;
+                    };
+                    node.filter(d => before.coords.has(d.name))
+                        .transition().duration(ANIMATE_MS).ease(d3.easeCubicInOut)
+                        .attr("transform", finalPosition);
+                    // New hosts, boxes and arrows fade in
+                    const fadeIn = selection => selection
+                        .style("opacity", 0)
+                        .transition().duration(ANIMATE_MS)
+                        .style("opacity", 1)
+                        .on("end", function () { d3.select(this).style("opacity", null); });
+                    fadeIn(node.filter(d => !before.coords.has(d.name)));
+                    fadeIn(d3.select(boxRects.node() && boxRects.node().parentNode));
+                    fadeIn(d3.select(edgePaths.node() && edgePaths.node().parentNode));
+                }
+                previous = {coords: geo.coords, top: geo.top};
+
                 if (view) {
                     svg.call(zoom.transform, view);
                     userMoved = true;
@@ -1276,7 +1520,24 @@
             });
             notifiedToggle.append(notifiedBox, " Notified services only");
 
-            controls.append(notifiedToggle, pickerButton);
+            // Layout engine: the module's own, or ELK (loaded on first use)
+            const layoutPicker = document.createElement("select");
+            layoutPicker.className = "topologygraph-layout";
+            layoutPicker.title = "Layout engine";
+            [["standard", "Standard layout"], ["elk", "ELK layout"]].forEach(([value, label]) => {
+                const option = document.createElement("option");
+                option.value = value;
+                option.textContent = label;
+                layoutPicker.append(option);
+            });
+            layoutPicker.value = layout;
+            layoutPicker.addEventListener("change", () => {
+                layout = layoutPicker.value;
+                updateUrl();
+                draw(null);
+            });
+
+            controls.append(layoutPicker, notifiedToggle, pickerButton);
             viewport.append(panel);
 
             const isFullscreen = () =>
@@ -1318,7 +1579,10 @@
             const hint = document.createElement("div");
             hint.className = "topologygraph-hint";
             const status = document.createElement("span");
-            hint.append(status, "Scroll to zoom \u00b7 Drag or Shift + scroll to move");
+            status.className = "topologygraph-status";
+            const layoutNote = document.createElement("span");
+            layoutNote.className = "topologygraph-note";
+            hint.append(layoutNote, status, "Scroll to zoom \u00b7 Drag or Shift + scroll to move");
             viewport.append(hint);
 
             // Legend for the colours, bottom left

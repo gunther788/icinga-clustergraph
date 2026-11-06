@@ -70,10 +70,42 @@ The layout tries to:
   notifications disabled. They then don't count towards the service rings or the counts in the hover text. The
   option is kept in the page address as `services=notified`, and combines with a host selection, for example
   `…/topologygraph?host=db-1&services=notified`.
+- **Layout engine:** the **Layout** menu in the controls switches between the module's own **Standard layout** and
+  the **ELK layout** (the Eclipse Layout Kernel). The choice is kept in the page address as `layout=elk`. See
+  [Layout engines](#layout-engines).
 - **Live updates:** while the page is visible, the graph fetches fresh data at the refresh interval (15 seconds by
   default) and catches up straight away when you return to the tab. A change of host state only recolours the existing drawing, so your zoom and
   position stay put. If hosts or dependencies were added or removed, the graph is laid out again. The bottom-right
   corner shows when it last updated.
+
+## Layout engines
+
+**Standard layout** (the default) is the module's own:
+
+- the rightmost groups are wrapped into side-by-side lists, so many checks don't make the graph tall;
+- the diagram's shape follows the window;
+- arrows are smooth curves.
+
+**ELK layout** uses the layered algorithm of the [Eclipse Layout Kernel](https://eclipse.dev/elk/), through
+[elkjs](https://github.com/kieler/elkjs):
+
+- arrows are routed at right angles around hosts and boxes, and never run through them;
+- hosts without parents are placed next to their children instead of always on the far right;
+- more arrows come out level;
+- but the rightmost groups form a single column, which gets tall with many checks;
+- arrows into the same host share their last stretch;
+- the diagram doesn't spread out to fill the window.
+
+On the test samples, ELK had fewer crossings on one graph and more on another, and no arrows through boxes or
+labels on any. To compare the two on your own hosts, save the output of `…/topologygraph/index/data` to a file and
+run `npm run compare -- that-file.json` in `tests/`. See [tests/README.md](tests/README.md).
+
+ELK is about 1.6 MB, so it isn't loaded with every Icinga Web page. The module serves it from
+`…/topologygraph/index/elk`, and the browser fetches it, and caches it, only when the ELK layout is chosen. If it
+can't be loaded, the standard layout is used and the reason is shown in the bottom-right corner.
+
+With either engine, hosts glide to their new places when the graph is laid out again, unless the viewer's system
+asks for reduced motion.
 
 ## Prerequisites
 
@@ -203,4 +235,7 @@ upstream at https://github.com/sol1/icinga-clustergraph.
 
 ## License
 
-All code here is licensed under GPL V2.
+All code here is licensed under GPL V2, except the bundled libraries in `public/js/vendor/`:
+
+- D3: ISC licence;
+- elkjs (`public/js/vendor/elkjs/`): EPL-2.0 OR GPL-3.0-or-later, see the `LICENSE.md` file there.

@@ -32,6 +32,26 @@ class IndexController extends Controller
 
     }
 
+    /**
+     * Serve the vendored ELK layout library (elkjs). It is large, so instead of
+     * adding it to the script bundle Icinga Web loads on every page, the graph
+     * page loads it from here only when the ELK layout is chosen.
+     */
+    public function elkAction()
+    {
+        $file = $this->Module()->getBaseDir() . '/public/js/vendor/elkjs/elk.bundled.js';
+        if (! is_readable($file)) {
+            $this->httpNotFound('ELK is not installed');
+        }
+
+        header('Content-Type: application/javascript; charset=utf-8');
+        header('Content-Length: ' . filesize($file));
+        header('Cache-Control: public, max-age=604800');
+        header('Last-Modified: ' . gmdate('D, d M Y H:i:s', filemtime($file)) . ' GMT');
+        readfile($file);
+        exit;
+    }
+
     public function testAction()
     {
         echo "Test Successful";
