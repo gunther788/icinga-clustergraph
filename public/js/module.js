@@ -727,13 +727,21 @@
      * left end of the label and arrive at the dot. ELK routes the arrows
      * orthogonally around hosts and boxes.
      *
+     * options.hybrid: wrap the tallest column of groups into side-by-side
+     * sub-columns, like the standard layout does, sized for options.area. A
+     * group in sub-column j gets a chain of j invisible stepping stones before
+     * its children, which pushes it j columns further out; ELK routes its arrow
+     * through them, drawn as one line.
+     *
      * Resolves to the same shape as computeLayout: {coords, boxes, edges,
      * width, height, top}; each edge also carries its route in `points`.
      */
-    function computeElkLayout(nodes, links) {
+    function computeElkLayout(nodes, links, options = {}) {
         return loadElk().then(ELK => {
+            const elk = new ELK();
             const ROW = BASE.rowHeight;
             const DOT_PAD = 4; // space right of a dot
+            const LAYER_GAP = 60;
             const labelWidth = measureLabels(nodes);
             const names = new Set(nodes.map(n => n.name));
             const validLinks = links.filter(l => names.has(l.source) && names.has(l.target) && l.source !== l.target);
@@ -759,59 +767,80 @@
             groups.forEach(group => {
                 group.names.sort((a, b) => d3.ascending(a, b));
                 group.names.forEach(name => groupOf.set(name, group));
+                group.width = BOX_PAD_X + Math.max(...group.names.map(name => labelWidth.get(name))) + LABEL_OFFSET + 5 + BOX_PAD_X;
+                group.height = group.names.length * ROW + 4;
             });
-            const widest = list => Math.max(0, ...list.map(name => labelWidth.get(name)));
             const port = (id, side, x, y) => ({id, x, y, width: 0, height: 0, layoutOptions: {"elk.port.side": side}});
 
-            const children = [];
-            groups.forEach(group => {
-                const width = BOX_PAD_X + widest(group.names) + LABEL_OFFSET + 5 + BOX_PAD_X;
-                const height = group.names.length * ROW + 4;
-                children.push({
-                    id: group.id, width, height,
-                    layoutOptions: {"elk.portConstraints": "FIXED_POS"},
-                    ports: [port(group.id + ":out", "WEST", 0, height / 2)]
-                });
-            });
-            nodes.filter(n => hasParent.has(n.name)).forEach(n => {
-                const width = labelWidth.get(n.name) + LABEL_OFFSET + 5 + DOT_PAD;
-                children.push({
-                    id: n.name, width, height: ROW,
-                    layoutOptions: {"elk.portConstraints": "FIXED_POS"},
-                    ports: [port(n.name + ":out", "WEST", 0, ROW / 2), port(n.name + ":in", "EAST", width, ROW / 2)]
-                });
-            });
-
             // One arrow per parent and child; a group's members share theirs
-            const edges = new Map();
+            const arrows = new Map();
             validLinks.forEach(l => {
                 const from = groupOf.has(l.source) ? groupOf.get(l.source).id : l.source;
                 const id = from + "->" + l.target;
-                if (!edges.has(id)) edges.set(id, {id, sources: [from + ":out"], targets: [l.target + ":in"], child: l.target, from});
+                if (!arrows.has(id)) arrows.set(id, {id, from, child: l.target});
             });
 
-            const graph = {
-                id: "root",
-                layoutOptions: {
-                    "elk.algorithm": "layered",
-                    "elk.direction": "LEFT",
-                    "elk.edgeRouting": "ORTHOGONAL",
-                    "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
-                    "elk.layered.spacing.nodeNodeBetweenLayers": "60",
-                    "elk.layered.spacing.edgeNodeBetweenLayers": "12",
-                    "elk.spacing.nodeNode": "8",
-                    "elk.spacing.edgeNode": "8",
-                    "elk.spacing.edgeEdge": "6",
-                    "elk.separateConnectedComponents": "true",
-                    "elk.spacing.componentComponent": "24",
-                    "elk.padding": "[top=" + PADDING + ",left=" + PADDING + ",bottom=" + PADDING + ",right=" + PADDING + "]"
-                },
-                children,
-                edges: [...edges.values()].map(e => ({id: e.id, sources: e.sources, targets: e.targets}))
+            const layoutOptions = {
+                "elk.algorithm": "layered",
+                "elk.direction": "LEFT",
+                "elk.edgeRouting": "ORTHOGONAL",
+                "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
+                "elk.layered.spacing.nodeNodeBetweenLayers": String(LAYER_GAP),
+                "elk.layered.spacing.edgeNodeBetweenLayers": "12",
+                "elk.spacing.nodeNode": "8",
+                "elk.spacing.edgeNode": "8",
+                "elk.spacing.edgeEdge": "6",
+                "elk.separateConnectedComponents": "true",
+                "elk.spacing.componentComponent": "24",
+                "elk.padding": "[top=" + PADDING + ",left=" + PADDING + ",bottom=" + PADDING + ",right=" + PADDING + "]"
             };
 
-            return new ELK().layout(graph).then(result => {
+            // The ELK graph; chains maps a group id to its number of stepping stones
+            const build = chains => {
+                const children = [];
+                const edges = [];
+                groups.forEach(group => {
+                    children.push({
+                        id: group.id, width: group.width, height: group.height,
+                        layoutOptions: {"elk.portConstraints": "FIXED_POS"},
+                        ports: [port(group.id + ":out", "WEST", 0, group.height / 2)]
+                    });
+                    // Stepping stones: tiny nodes the group's arrows run through
+                    for (let i = 1; i <= (chains.get(group.id) || 0); i++) {
+                        const id = group.id + ":stone" + i;
+                        children.push({
+                            id, width: 2, height: 2,
+                            layoutOptions: {"elk.portConstraints": "FIXED_POS"},
+                            ports: [port(id + ":out", "WEST", 0, 1), port(id + ":in", "EAST", 2, 1)]
+                        });
+                        const previous = i === 1 ? group.id : group.id + ":stone" + (i - 1);
+                        edges.push({id: id + ":edge", sources: [previous + ":out"], targets: [id + ":in"]});
+                    }
+                });
+                nodes.filter(n => hasParent.has(n.name)).forEach(n => {
+                    const width = labelWidth.get(n.name) + LABEL_OFFSET + 5 + DOT_PAD;
+                    children.push({
+                        id: n.name, width, height: ROW,
+                        layoutOptions: {"elk.portConstraints": "FIXED_POS"},
+                        ports: [port(n.name + ":out", "WEST", 0, ROW / 2), port(n.name + ":in", "EAST", width, ROW / 2)]
+                    });
+                });
+                arrows.forEach(a => {
+                    const stones = groupById.has(a.from) ? (chains.get(a.from) || 0) : 0;
+                    const start = stones ? a.from + ":stone" + stones : a.from;
+                    edges.push({id: a.id, sources: [start + ":out"], targets: [a.child + ":in"]});
+                });
+                return {id: "root", layoutOptions, children, edges};
+            };
+
+            // Turn ELK's result into what render() draws
+            const interpret = (result, chains) => {
                 const placed = new Map(result.children.map(c => [c.id, c]));
+                const routed = new Map((result.edges || []).map(e => [e.id, e]));
+                const sectionPoints = id => {
+                    const section = ((routed.get(id) || {}).sections || [])[0];
+                    return section ? [section.startPoint, ...(section.bendPoints || []), section.endPoint] : [];
+                };
                 const coords = new Map();
                 const boxes = [];
                 groups.forEach(group => {
@@ -828,28 +857,82 @@
                     coords.set(n.name, {x: box.x + labelWidth.get(n.name) + LABEL_OFFSET, y: box.y + ROW / 2});
                 });
 
-                const routed = new Map((result.edges || []).map(e => [e.id, e]));
-                const drawnEdges = [...edges.values()].map(e => {
-                    const section = (routed.get(e.id).sections || [])[0];
-                    const dot = coords.get(e.child);
-                    const points = section
-                        ? [section.startPoint, ...(section.bendPoints || []), section.endPoint]
-                        : [{x: dot.x + 30, y: dot.y}];
+                const edges = [...arrows.values()].map(a => {
+                    const dot = coords.get(a.child);
+                    const points = [];
+                    // Through the stepping stones first, if any
+                    const stones = groupById.has(a.from) ? (chains.get(a.from) || 0) : 0;
+                    for (let i = 1; i <= stones; i++) points.push(...sectionPoints(a.from + ":stone" + i + ":edge"));
+                    points.push(...sectionPoints(a.id));
+                    if (!points.length) points.push({x: dot.x + 30, y: dot.y});
                     // Finish at the dot (the port sits just right of it)
                     points.push({x: dot.x, y: dot.y});
                     return {
                         source: points[0],
                         target: dot,
-                        child: e.child,
+                        child: a.child,
                         // A group's arrow belongs to all of its members
-                        parents: groupById.has(e.from) ? groupById.get(e.from).names : [e.from],
+                        parents: groupById.has(a.from) ? groupById.get(a.from).names : [a.from],
                         points
                     };
                 });
 
-                return {coords, boxes, edges: drawnEdges, width: result.width, height: result.height, top: 0};
+                return {coords, boxes, edges, width: result.width, height: result.height, top: 0};
+            };
+
+            const none = new Map();
+            return elk.layout(build(none)).then(first => {
+                if (!options.hybrid || !options.area) return interpret(first, none);
+                const chains = chooseWrapping(first, groups, options.area, LAYER_GAP);
+                if (!chains.size) return interpret(first, none);
+                return elk.layout(build(chains)).then(second => interpret(second, chains));
             });
         });
+    }
+
+    /**
+     * For the hybrid layout: given a first ELK run, decide how to wrap the
+     * rightmost column of groups (those with children) into k side-by-side
+     * sub-columns, and return the stepping stones each group needs (0 for the
+     * first sub-column). k is chosen like the standard layout chooses its
+     * sub-column height: show the diagram as large as possible up to 100%, and
+     * among sizes that fit, the one shaped most like the viewport. Groups are
+     * dealt out in turn from top to bottom, so every sub-column covers the
+     * whole height and groups stay level with their children.
+     */
+    function chooseWrapping(first, groups, area, layerGap) {
+        const placed = new Map(first.children.map(c => [c.id, c]));
+        const linked = groups.filter(g => g.children.length).map(g => ({group: g, box: placed.get(g.id)}));
+        if (linked.length < 2) return new Map();
+        const right = Math.max(...linked.map(g => g.box.x + g.box.width));
+        const column = linked.filter(g => g.box.x + g.box.width > right - 1).sort((a, b) => a.box.y - b.box.y);
+        if (column.length < 2) return new Map();
+
+        const inColumn = new Set(column.map(g => g.group.id));
+        const others = first.children.filter(c => !inColumn.has(c.id));
+        const span = list => list.length
+            ? Math.max(...list.map(c => c.y + c.height)) - Math.min(...list.map(c => c.y))
+            : 0;
+        const columnHeight = span(column.map(g => g.box));
+        const otherHeight = span(others);
+        const columnWidth = Math.max(...column.map(g => g.box.width));
+        const padding = 2 * PADDING;
+        const targetAspect = area.width / area.height;
+
+        let best = {k: 1, scale: -1, aspectError: Infinity};
+        for (let k = 1; k <= Math.min(8, column.length); k++) {
+            const width = first.width + (k - 1) * (columnWidth + layerGap);
+            const height = Math.max(otherHeight, columnHeight / k) + padding;
+            const scale = Math.min(1, area.width / width, area.height / height);
+            const aspectError = Math.abs(Math.log((width / height) / targetAspect));
+            if (scale > best.scale + 1e-6 || (Math.abs(scale - best.scale) <= 1e-6 && aspectError < best.aspectError)) {
+                best = {k, scale, aspectError};
+            }
+        }
+
+        const chains = new Map();
+        if (best.k > 1) column.forEach((g, i) => { if (i % best.k) chains.set(g.group.id, i % best.k); });
+        return chains;
     }
 
     // An orthogonal route as an SVG path with rounded corners
@@ -920,7 +1003,7 @@
         return {
             hosts: params.getAll("host"),
             notifiedOnly: params.get("services") === "notified",
-            layout: params.get("layout") === "elk" ? "elk" : "standard"
+            layout: ["elk", "hybrid"].includes(params.get("layout")) ? params.get("layout") : "standard"
         };
     };
     const writeUrlState = (state, container) => {
@@ -931,7 +1014,7 @@
         url.searchParams.delete("layout");
         state.hosts.forEach(name => url.searchParams.append("host", name));
         if (state.notifiedOnly) url.searchParams.append("services", "notified");
-        if (state.layout === "elk") url.searchParams.append("layout", "elk");
+        if (state.layout && state.layout !== "standard") url.searchParams.append("layout", state.layout);
         if (url.href !== window.location.href) {
             // Replace rather than push: Icinga keeps its own history entries,
             // and its state object is kept as it is
@@ -968,8 +1051,14 @@
             // Only one refresh loop at a time, even if Icinga renders us again
             if (this.stopRefresh) this.stopRefresh();
 
+            // Build the (empty) viewport straight away, so there is something
+            // to see while Icinga is asked for the data
+            const graph = this.mount(container);
+            graph.progress("Loading hosts from Icinga\u2026", 0.15);
+
             load().then(data => {
-                const graph = this.mount(container);
+                if (!graph.isConnected()) return;
+                graph.progress("Received " + (data.nodes || []).length + " hosts\u2026", 0.4);
                 graph.setData(data);
                 graph.setStatus("Updated " + time());
 
@@ -1008,9 +1097,9 @@
                 timer = setInterval(refresh, interval);
                 this.stopRefresh = stop;
             }).catch(error => {
-                const message = document.createElement("p");
-                message.textContent = "Could not load the graph (" + error.message + "). Reload the page to try again.";
-                container.replaceChildren(message);
+                if (graph.isConnected()) {
+                    graph.progressFailed("Could not load the graph (" + error.message + "). Reload the page to try again.");
+                }
             });
         },
 
@@ -1078,6 +1167,38 @@
             const zoomLayer = svg.append("g");
             const content = zoomLayer.append("g");
 
+            // Loading progress: a card in the middle until there is a drawing,
+            // then a slim bar at the top while the graph is laid out again.
+            // The moving highlight is a CSS transform animation, which the
+            // browser keeps running even while the layout calculation is busy.
+            const loading = document.createElement("div");
+            loading.className = "topologygraph-loading";
+            loading.hidden = true;
+            loading.setAttribute("role", "status");
+            const loadingText = document.createElement("div");
+            loadingText.className = "topologygraph-loading-text";
+            const loadingBar = document.createElement("div");
+            loadingBar.className = "topologygraph-loading-bar";
+            const loadingFill = document.createElement("div");
+            loadingFill.className = "topologygraph-loading-fill";
+            loadingBar.append(loadingFill);
+            loading.append(loadingText, loadingBar);
+            viewport.append(loading);
+            const progress = (text, fraction) => {
+                loading.hidden = false;
+                loading.classList.toggle("topologygraph-loading-first", previous === null);
+                loading.classList.remove("topologygraph-loading-failed");
+                loadingText.textContent = text;
+                loadingFill.style.width = Math.round(Math.max(0.05, Math.min(1, fraction)) * 100) + "%";
+            };
+            const progressDone = () => { loading.hidden = true; };
+            const progressFailed = text => {
+                progress(text, 1);
+                loading.classList.add("topologygraph-loading-failed");
+            };
+            // Resolves after the browser has had a chance to paint
+            const afterPaint = () => new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+
             const emptyMessage = document.createElement("p");
             emptyMessage.className = "topologygraph-empty";
             emptyMessage.hidden = true;
@@ -1138,7 +1259,9 @@
                 const t = d3.zoomIdentity
                     .translate((area.width - width * k) / 2, reservedTop + (area.height - height * k) / 2)
                     .scale(k);
-                (animate ? svg.transition().duration(250) : svg).call(zoom.transform, t);
+                // animate: true for the Fit button, or a duration in ms
+                const duration = typeof animate === "number" ? animate : 250;
+                (animate ? svg.transition().duration(duration).ease(d3.easeCubicInOut) : svg).call(zoom.transform, t);
                 userMoved = false;
             };
 
@@ -1149,7 +1272,7 @@
             const urlState = readUrlState();
             let selected = urlState.hosts; // host names; empty means all hosts
             let notifiedOnly = urlState.notifiedOnly; // ignore services with notifications disabled
-            let layout = urlState.layout; // "standard" or "elk"
+            let layout = urlState.layout; // "standard", "elk" or "hybrid"
             const updateUrl = () => writeUrlState({hosts: selected, notifiedOnly, layout}, container);
             // The service summary to show: all services, or only those with
             // notifications enabled (falls back if the server doesn't send it)
@@ -1167,7 +1290,10 @@
             const smoothLink = d3.linkHorizontal().x(p => p.x).y(p => p.y);
             let drawToken = 0;   // a newer draw() supersedes one still waiting for ELK
 
+            let hasData = false; // nothing to lay out until the first data arrives
+
             const draw = view => {
+                if (!hasData) return;
                 const token = ++drawToken;
                 const data = visibleData();
                 const nodes = (data.nodes || []).map(n => Object.assign({}, n));
@@ -1179,25 +1305,43 @@
                 if (!nodes.length) {
                     content.selectAll("*").remove();
                     previous = null;
+                    progressDone();
                     drawn = {structure: structureOf(data), update: () => {}, restyle: () => {}};
                     return;
                 }
 
                 const standard = () => computeLayout(nodes, links, area);
-                if (layout === "elk") {
-                    // The current drawing stays until ELK has finished
-                    computeElkLayout(nodes, links).then(geo => {
-                        if (token !== drawToken || !viewport.isConnected) return;
+                const current = () => token === drawToken && viewport.isConnected;
+                const laying = `Laying out ${nodes.length} host${nodes.length === 1 ? "" : "s"}\u2026`;
+                // The current drawing stays until the new layout is ready. Show
+                // progress first and let the browser paint it, because the
+                // layout calculation keeps the page busy.
+                if (layout === "elk" || layout === "hybrid") {
+                    progress(window.ELK ? laying : "Loading the ELK layout engine\u2026", window.ELK ? 0.6 : 0.4);
+                    afterPaint()
+                        .then(() => loadElk())
+                        .then(() => {
+                            if (!current()) return null;
+                            progress(laying, 0.7);
+                            return afterPaint().then(() => computeElkLayout(nodes, links, {hybrid: layout === "hybrid", area}));
+                        })
+                        .then(geo => {
+                            if (!geo || !current()) return;
+                            layoutNote.textContent = "";
+                            render(geo, nodes, links, data, view);
+                        })
+                        .catch(error => {
+                            if (!current()) return;
+                            layoutNote.textContent = "ELK layout failed (" + error.message + "), using the standard layout \u00b7 ";
+                            render(standard(), nodes, links, data, view);
+                        });
+                } else {
+                    progress(laying, 0.6);
+                    afterPaint().then(() => {
+                        if (!current()) return;
                         layoutNote.textContent = "";
-                        render(geo, nodes, links, data, view);
-                    }).catch(error => {
-                        if (token !== drawToken || !viewport.isConnected) return;
-                        layoutNote.textContent = "ELK layout failed (" + error.message + "), using the standard layout \u00b7 ";
                         render(standard(), nodes, links, data, view);
                     });
-                } else {
-                    layoutNote.textContent = "";
-                    render(standard(), nodes, links, data, view);
                 }
             };
 
@@ -1395,23 +1539,27 @@
                     node.filter(d => before.coords.has(d.name))
                         .transition().duration(ANIMATE_MS).ease(d3.easeCubicInOut)
                         .attr("transform", finalPosition);
-                    // New hosts, boxes and arrows fade in
-                    const fadeIn = selection => selection
+                    // New hosts fade in as the others glide; boxes and arrows
+                    // only appear once everything has arrived, so they never
+                    // sit somewhere their hosts haven't reached yet
+                    const fadeIn = (selection, delay, duration) => selection
                         .style("opacity", 0)
-                        .transition().duration(ANIMATE_MS)
+                        .transition().delay(delay).duration(duration)
                         .style("opacity", 1)
                         .on("end", function () { d3.select(this).style("opacity", null); });
-                    fadeIn(node.filter(d => !before.coords.has(d.name)));
-                    fadeIn(d3.select(boxRects.node() && boxRects.node().parentNode));
-                    fadeIn(d3.select(edgePaths.node() && edgePaths.node().parentNode));
+                    fadeIn(node.filter(d => !before.coords.has(d.name)), 0, ANIMATE_MS);
+                    fadeIn(d3.select(boxRects.node() && boxRects.node().parentNode), ANIMATE_MS, 200);
+                    fadeIn(d3.select(edgePaths.node() && edgePaths.node().parentNode), ANIMATE_MS, 200);
                 }
                 previous = {coords: geo.coords, top: geo.top};
+                progressDone();
 
                 if (view) {
                     svg.call(zoom.transform, view);
                     userMoved = true;
                 } else {
-                    fit(false);
+                    // Zoom along with the gliding hosts, so the picture moves as one
+                    fit(animate ? ANIMATE_MS : false);
                 }
             };
 
@@ -1424,6 +1572,7 @@
             // only them and everything above them
             const pickerButton = document.createElement("button");
             pickerButton.type = "button";
+            pickerButton.textContent = "All hosts \u25be";
             pickerButton.className = "topologygraph-picker-button";
             pickerButton.title = "Show only some hosts and everything above them";
             const panel = document.createElement("div");
@@ -1520,11 +1669,12 @@
             });
             notifiedToggle.append(notifiedBox, " Notified services only");
 
-            // Layout engine: the module's own, or ELK (loaded on first use)
+            // Layout engine: the module's own, ELK (loaded on first use), or the
+            // hybrid of the two (ELK, with the rightmost column wrapped)
             const layoutPicker = document.createElement("select");
             layoutPicker.className = "topologygraph-layout";
             layoutPicker.title = "Layout engine";
-            [["standard", "Standard layout"], ["elk", "ELK layout"]].forEach(([value, label]) => {
+            [["standard", "Standard layout"], ["elk", "ELK layout"], ["hybrid", "Hybrid layout"]].forEach(([value, label]) => {
                 const option = document.createElement("option");
                 option.value = value;
                 option.textContent = label;
@@ -1707,11 +1857,14 @@
 
             return {
                 isConnected: () => viewport.isConnected,
+                progress,
+                progressFailed,
                 setStatus: text => { status.textContent = text ? text + " \u00b7 " : ""; },
                 // New data: recolour in place if the shown hosts and dependencies
                 // are unchanged, else re-lay out (keeping the user's view)
                 setData: data => {
                     fullData = {nodes: data.nodes || [], links: data.links || []};
+                    hasData = true;
                     hostGroup = data.hostgroup || "synthetic";
                     updatePicker();
                     const visible = visibleData();

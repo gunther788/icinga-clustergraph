@@ -29,7 +29,7 @@ The layout tests have limits for crossing and horizontal arrows on each sample, 
 
 ## Comparing layout engines
 
-`npm run compare` prints measurements for the standard and ELK layouts on each sample graph:
+`npm run compare` prints measurements for the standard, ELK and hybrid layouts on each sample graph:
 
 - crossing arrows;
 - arrows through boxes or labels;

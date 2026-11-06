@@ -70,9 +70,11 @@ The layout tries to:
   notifications disabled. They then don't count towards the service rings or the counts in the hover text. The
   option is kept in the page address as `services=notified`, and combines with a host selection, for example
   `…/topologygraph?host=db-1&services=notified`.
-- **Layout engine:** the **Layout** menu in the controls switches between the module's own **Standard layout** and
-  the **ELK layout** (the Eclipse Layout Kernel). The choice is kept in the page address as `layout=elk`. See
-  [Layout engines](#layout-engines).
+- **Layout engine:** the **Layout** menu in the controls switches between the module's own **Standard layout**, the
+  **ELK layout** (the Eclipse Layout Kernel) and the **Hybrid layout** of the two. The choice is kept in the page
+  address as `layout=elk` or `layout=hybrid`. See [Layout engines](#layout-engines).
+- **Loading:** while the data is fetched and the graph laid out, a card in the middle shows what is happening, with
+  a progress bar. Later re-layouts, for example after choosing a subset, show a slim bar at the top instead.
 - **Live updates:** while the page is visible, the graph fetches fresh data at the refresh interval (15 seconds by
   default) and catches up straight away when you return to the tab. A change of host state only recolours the existing drawing, so your zoom and
   position stay put. If hosts or dependencies were added or removed, the graph is laid out again. The bottom-right
@@ -96,8 +98,23 @@ The layout tries to:
 - arrows into the same host share their last stretch;
 - the diagram doesn't spread out to fill the window.
 
-On the test samples, ELK had fewer crossings on one graph and more on another, and no arrows through boxes or
-labels on any. To compare the two on your own hosts, save the output of `…/topologygraph/index/data` to a file and
+**Hybrid layout** is ELK with the standard layout's wrapping: when the rightmost column of boxes is much taller than
+the rest, it is split into side-by-side columns, as many as it takes to show the diagram as large as possible in the
+window. The boxes are dealt out in turn from top to bottom, so each column covers the whole height and boxes stay
+level with their children. ELK still places everything and routes the arrows. It runs ELK twice, once to see the
+shape and once for the final layout.
+
+On the test samples (1400×800 window):
+
+| sample | layout | crossings | arrows through boxes/labels | level arrows | shown at |
+|---|---|---|---|---|---|
+| 23 parents | standard | 2 | 1 | 6/14 | 100% |
+| 23 parents | ELK / hybrid | 4 | 0 | 6/14 | 100% |
+| random 40 | standard | 13 | 6 | 0/26 | 100% |
+| random 40 | ELK | 10 | 0 | 6/26 | 64% |
+| random 40 | hybrid | 10 | 0 | 7/26 | 100% |
+
+When the rightmost column isn't too tall, as in the 23-parent sample, hybrid and ELK give the same picture. To compare the two on your own hosts, save the output of `…/topologygraph/index/data` to a file and
 run `npm run compare -- that-file.json` in `tests/`. See [tests/README.md](tests/README.md).
 
 ELK is about 1.6 MB, so it isn't loaded with every Icinga Web page. The module serves it from

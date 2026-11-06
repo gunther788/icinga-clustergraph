@@ -49,16 +49,18 @@ function fixture(name) {
  * @param {object} [options.viewport] Browser window size
  * @param {boolean} [options.clock]  Install Playwright's fake clock before loading
  * @param {boolean} [options.elkFail] Make the ELK library fail to load
+ * @param {number} [options.delay]   Delay the data endpoint's answers by this many ms
+ * @param {boolean} [options.wait]   Wait for the first drawing (default true)
  * @returns {Promise<{browser, page, server, errors, close}>}
  */
-async function open({data, query = '', viewport = {width: 1280, height: 720}, clock = false, elkFail = false}) {
+async function open({data, query = '', viewport = {width: 1280, height: 720}, clock = false, elkFail = false, delay = 0, wait = true}) {
     const css = await moduleCss();
     const browser = await chromium.launch();
     const page = await browser.newPage({viewport});
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
 
-    const server = {data, fail: false, fetches: 0, elkFail, elkRequests: 0};
+    const server = {data, fail: false, fetches: 0, elkFail, elkRequests: 0, delay};
     const html = `<!doctype html><html><head><meta charset="utf-8"><style>${ICINGA_CSS}${css}</style></head><body>
         <div id="header"></div><div id="sidebar"></div>
         <div class="container" id="col1" data-icinga-url="${PAGE}">
@@ -75,10 +77,11 @@ async function open({data, query = '', viewport = {width: 1280, height: 720}, cl
         </script>
     </body></html>`;
 
-    await page.route(ORIGIN + '/**', route => {
+    await page.route(ORIGIN + '/**', async route => {
         const url = new URL(route.request().url());
         if (url.pathname === PAGE + '/index/data') {
             server.fetches++;
+            if (server.delay) await new Promise(resolve => setTimeout(resolve, server.delay));
             if (server.fail) return route.fulfill({status: 500, body: 'failed'});
             return route.fulfill({contentType: 'application/json', body: JSON.stringify(server.data)});
         }
@@ -107,7 +110,7 @@ async function open({data, query = '', viewport = {width: 1280, height: 720}, cl
 
     if (clock) await page.clock.install();
     await page.goto(ORIGIN + PAGE + query);
-    await settle(page, clock);
+    if (wait) await settle(page, clock);
 
     return {browser, page, server, errors, close: () => browser.close()};
 }

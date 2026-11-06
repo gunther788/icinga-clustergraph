@@ -1,5 +1,5 @@
 /**
- * Compare the standard and ELK layouts on the sample graphs, or on your own
+ * Compare the standard, ELK and hybrid layouts on the sample graphs, or on your own
  * graph data, and print the measurements.
  *
  *     npm run compare                      # the samples in fixtures/
@@ -22,10 +22,10 @@ const graphs = files.length
 (async () => {
     const rows = [];
     for (const [name, data] of graphs) {
-        for (const layout of ['standard', 'elk']) {
+        for (const layout of ['standard', 'elk', 'hybrid']) {
             const started = Date.now();
-            const o = await open({data, viewport: {width, height}, query: layout === 'elk' ? '?layout=elk' : ''});
-            if (layout === 'elk') {
+            const o = await open({data, viewport: {width, height}, query: layout === 'standard' ? '' : '?layout=' + layout});
+            if (layout !== 'standard') {
                 await o.page.waitForFunction(() => {
                     const paths = document.querySelectorAll('.topologygraph-viewport svg path[marker-end]');
                     return paths.length && [...paths].every(p => !p.getAttribute('d').includes('C'));

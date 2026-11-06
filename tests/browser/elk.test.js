@@ -116,3 +116,25 @@ test('hosts glide to their new places when the graph is laid out again', async (
         await close();
     }
 });
+
+test('the hybrid layout wraps the tall column of boxes and keeps ELK routing', async () => {
+    const data = fixture('random40');
+    const {page, errors, close} = await open({data, query: '?layout=hybrid', viewport: {width: 1400, height: 800}});
+    try {
+        await waitForElk(page);
+        assert.equal(await page.$eval('.topologygraph-layout', s => s.value), 'hybrid');
+        assert.equal((await drawnHosts(page)).length, data.nodes.length);
+        const m = await routeMetrics(page);
+        assert.equal(m.shownAt, '100%', 'fits at full size (plain ELK needs 64% here)');
+        assert.equal(m.throughBoxesOrLabels, 0, 'no arrow runs through a box or label');
+        // The boxes of hosts with children sit in more than one column
+        const columns = await page.$$eval('.topologygraph-viewport svg rect', rects => {
+            const rights = rects.filter(r => +r.getAttribute('height') > 60).map(r => Math.round(+r.getAttribute('x') + +r.getAttribute('width')));
+            return new Set(rights).size;
+        });
+        assert.ok(columns >= 2, `boxes in ${columns} columns`);
+        assert.deepEqual(errors, []);
+    } finally {
+        await close();
+    }
+});
