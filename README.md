@@ -41,9 +41,8 @@ refresh interval.
 - **Service problems:** a ring around a host's dot shows its worst service problem: red for critical, orange for
   warning, purple for unknown. The ring is solid while any problem is unhandled, and dashed and faded when all of
   them are acknowledged or in downtime. A legend in the bottom-left corner explains the colours.
-- **Hosts outside the group:** they're drawn faded and in italics. "The group" here means the host group from the
-  module settings, plus any host group selected in the picker or with `hostgroup=` in the address: hosts in a
-  selected group are drawn as members too.
+- **Hosts outside the group:** they're drawn faded and in italics. "The group" here is the host group from the
+  module settings; selecting host groups in the picker or with `hostgroup=` only chooses which hosts are shown.
 - **Hovering a host:** highlights everything above and below it, along with the arrows on those chains, and dims
   the rest. The hover text shows the host's state, its service counts and its zone. Click a host to open it in
   Icinga Web.

@@ -1319,11 +1319,10 @@
                 if (!hasData) return;
                 const token = ++drawToken;
                 const data = visibleData();
-                // Drawn as a member: hosts of the configured group, and hosts
-                // of any group selected in the picker or URL
-                const nodes = (data.nodes || []).map(n => Object.assign({}, n, {
-                    inGroup: !!n.synthetic || (n.groups || []).some(group => selectedGroups.includes(group))
-                }));
+                // Drawn as a member (bold, solid dot, blue arrows): hosts of the
+                // host group from the module settings. Selecting groups in the
+                // picker or URL only chooses what is shown, not how.
+                const nodes = (data.nodes || []).map(n => Object.assign({}, n, {inGroup: !!n.synthetic}));
                 const links = data.links || [];
                 emptyMessage.hidden = nodes.length > 0;
                 emptyMessage.textContent = `No hosts found in the "${hostGroup}" host group.`;
@@ -1491,7 +1490,6 @@
                         servicesText(serviceSummary(d), notifiedOnly),
                         d.zone ? "zone: " + d.zone : null,
                         d.inGroup ? null : "not in the " + hostGroup + " host group"
-                            + (selectedGroups.length ? " or the selected groups" : "")
                     ].filter(Boolean).join("\n"));
                     const ringState = d => {
                         const summary = serviceSummary(d);

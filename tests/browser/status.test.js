@@ -183,7 +183,7 @@ test('arrows to or from hosts outside the group are gray', async () => {
     }
 });
 
-test('hosts in a host group selected in the URL are drawn as members', async () => {
+test('selecting a host group changes what is shown, not how it is drawn', async () => {
     // db-1 is not in the configured group, but in "databases"; its parents
     // web-1 and api-1 are in the configured group
     const data = fixture('small');
@@ -195,37 +195,17 @@ test('hosts in a host group selected in the URL are drawn as members', async () 
         title: a.querySelector('title').textContent
     }));
 
-    const plain = await open({data});
-    try {
-        const db = await label(plain.page, 'db-1');
-        assert.deepEqual([db.weight, db.dashed], ['normal', true], 'outside the configured group: faded');
-        assert.match(db.title, /not in the synthetic host group$/m);
-        assert.ok((await arrowsInto(plain.page))['db-1'].every(x => x.stroke === '#adb3bc'), 'arrows into it: gray');
-    } finally {
-        await plain.close();
-    }
-
-    const selected = await open({data, query: '?hostgroup=databases'});
-    try {
-        const db = await label(selected.page, 'db-1');
-        assert.deepEqual([db.weight, db.dashed], ['bold', false], 'in a selected group: drawn as a member');
-        assert.doesNotMatch(db.title, /not in the/);
-        assert.ok((await arrowsInto(selected.page))['db-1'].every(x => x.stroke === '#00c3ed'), 'arrows into it: blue');
-        // core-router is in neither group and isn't above db-1, so it isn't shown;
-        // a host above db-1 that is in neither group would still be faded
-        assert.deepEqual(selected.errors, []);
-    } finally {
-        await selected.close();
-    }
-
-    // A host in neither group still says so
-    Object.assign(data.nodes.find(n => n.name === 'web-1'), {synthetic: false, groups: []});
-    const both = await open({data, query: '?hostgroup=databases'});
-    try {
-        assert.match((await label(both.page, 'web-1')).title, /not in the synthetic host group or the selected groups/);
-        assert.ok((await arrowsInto(both.page))['db-1'].some(x => x.stroke === '#adb3bc'), 'its arrow is gray');
-    } finally {
-        await both.close();
+    for (const query of ['', '?hostgroup=databases']) {
+        const {page, errors, close} = await open({data, query});
+        try {
+            const db = await label(page, 'db-1');
+            assert.deepEqual([db.weight, db.dashed], ['normal', true], `${query || 'no selection'}: still drawn as outside the group`);
+            assert.match(db.title, /not in the synthetic host group$/m);
+            assert.ok((await arrowsInto(page))['db-1'].every(x => x.stroke === '#adb3bc'), 'arrows into it stay gray');
+            assert.deepEqual(errors, []);
+        } finally {
+            await close();
+        }
     }
 });
 
