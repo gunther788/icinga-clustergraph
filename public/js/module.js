@@ -26,7 +26,10 @@
         warning: "#ffaa44",
         critical: "#ff5566",
         unknown: "#aa44ff",
-        edge: "#00c3ed"
+        edge: "#00c3ed",
+        // Arrows with a host outside the group at either end: a gray that
+        // stays visible on Icinga Web's dark and light themes
+        edgeOutside: "#7f8792"
     };
 
     function stateName(node) {
@@ -1149,7 +1152,7 @@
                 .attr("style", "display: block; touch-action: none; font: " + FONT_SIZE + "px sans-serif;");
             const defs = svg.append("defs");
             // One arrowhead per arrow colour
-            const arrowColours = [COLOURS.edge, COLOURS.down, COLOURS.unreachable];
+            const arrowColours = [COLOURS.edge, COLOURS.down, COLOURS.unreachable, COLOURS.edgeOutside];
             const markerFor = colour => "url(#topologygraph-arrow-" + arrowColours.indexOf(colour) + ")";
             arrowColours.forEach((colour, i) => {
                 const id = "topologygraph-arrow-" + i;
@@ -1378,8 +1381,16 @@
                 // Arrows take the colour of a child that is down or unreachable;
                 // handled problems are faded
                 const childOf = e => nodeByName.get(e.child);
-                const arrowColour = e => isProblem(childOf(e)) ? stateColor(childOf(e)) : COLOURS.edge;
-                const arrowOpacity = e => !isProblem(childOf(e)) ? 0.5 : isHandled(childOf(e)) ? 0.35 : 0.85;
+                // Two kinds of arrows: between hosts of the group (blue), and
+                // dependencies with a host outside the group at either end
+                // (gray). Arrows into a host that is down or unreachable keep
+                // that colour either way.
+                const outside = e => !childOf(e).synthetic
+                    || e.parents.some(p => nodeByName.has(p) && !nodeByName.get(p).synthetic);
+                const arrowColour = e => isProblem(childOf(e)) ? stateColor(childOf(e))
+                    : outside(e) ? COLOURS.edgeOutside : COLOURS.edge;
+                const arrowOpacity = e => !isProblem(childOf(e)) ? (outside(e) ? 0.75 : 0.5)
+                    : isHandled(childOf(e)) ? 0.35 : 0.85;
                 const arrowRank = e => !isProblem(childOf(e)) ? 0 : isHandled(childOf(e)) ? 1 : 2;
 
                 // Boxes stay unfilled so an edge from an outer box can be followed
@@ -1821,13 +1832,32 @@
                 icon.append(dot);
                 return icon;
             };
+            // A short arrow, for the two kinds of dependency
+            const arrowSwatch = colour => {
+                const ns = "http://www.w3.org/2000/svg";
+                const icon = document.createElementNS(ns, "svg");
+                icon.setAttribute("width", "20");
+                icon.setAttribute("height", "12");
+                icon.setAttribute("viewBox", "-10 -6 20 12");
+                const line = document.createElementNS(ns, "path");
+                line.setAttribute("d", "M9,0H-6");
+                line.setAttribute("stroke", colour);
+                line.setAttribute("stroke-width", "1.6");
+                const head = document.createElementNS(ns, "path");
+                head.setAttribute("d", "M-9,0L-4,-3.5L-4,3.5Z");
+                head.setAttribute("fill", colour);
+                icon.append(line, head);
+                return icon;
+            };
             [
                 [swatch(COLOURS.up), "up"],
                 [swatch(COLOURS.down), "down"],
                 [swatch(COLOURS.unreachable), "unreachable (parent down)"],
                 [swatch(COLOURS.down, {faded: true}), "acknowledged / downtime"],
                 [swatch(COLOURS.pending), "pending"],
-                [swatch(COLOURS.up, {ring: COLOURS.warning}), "service problem"]
+                [swatch(COLOURS.up, {ring: COLOURS.warning}), "service problem"],
+                [arrowSwatch(COLOURS.edge), "within the host group"],
+                [arrowSwatch(COLOURS.edgeOutside), "to or from other hosts"]
             ].forEach(([icon, text]) => {
                 const item = document.createElement("span");
                 item.append(icon, text);
@@ -1877,19 +1907,22 @@
             // Re-lay out (and refit) after the viewport settles at a new size,
             // unless the user has zoomed or panned
             let relayoutTimer = null;
+            const sizeChanged = () => Math.abs(viewport.clientWidth - laidOutFor.width) > 20
+                || Math.abs(viewport.clientHeight - laidOutFor.height) > 20;
             const relayoutSoon = force => {
                 clearTimeout(relayoutTimer);
                 relayoutTimer = setTimeout(() => {
                     if (!viewport.isConnected) return;
-                    if (force || !userMoved) draw(null);
+                    // Check again when it comes due: the drawing may already be
+                    // laid out for this size (e.g. the first one, made after the
+                    // viewport's initial resize notice but before this timer)
+                    if (!force && (userMoved || !sizeChanged())) return;
+                    draw(null);
                 }, 200);
             };
             if (window.ResizeObserver) {
                 new ResizeObserver(() => {
-                    if (Math.abs(viewport.clientWidth - laidOutFor.width) > 20
-                        || Math.abs(viewport.clientHeight - laidOutFor.height) > 20) {
-                        relayoutSoon(false);
-                    }
+                    if (sizeChanged()) relayoutSoon(false);
                 }).observe(viewport);
             }
 

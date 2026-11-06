@@ -79,3 +79,18 @@ test('full screen covers the window and comes back', async () => {
         await close();
     }
 });
+
+test('the first drawing is not followed by a second one', async () => {
+    for (const viewport of [{width: 1100, height: 420}, {width: 1280, height: 720}]) {
+        const {page, close} = await open({data: fixture('small'), viewport, wait: false});
+        try {
+            await page.waitForSelector('.topologygraph-viewport svg a');
+            await page.evaluate(() => { document.querySelector('.topologygraph-viewport svg a').dataset.first = '1'; });
+            await page.waitForTimeout(1200);
+            assert.equal(await page.evaluate(() => !!document.querySelector('.topologygraph-viewport svg a[data-first]')), true,
+                `${viewport.width}x${viewport.height}: still the first drawing`);
+        } finally {
+            await close();
+        }
+    }
+});

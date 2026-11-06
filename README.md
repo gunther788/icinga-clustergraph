@@ -34,7 +34,10 @@ refresh interval.
   make the graph very tall.
 - **Colours:** dots and names show host state: green for up, red for down, purple for unreachable (down only
   because a parent is down), blue for pending, grey for unknown. Problems that are acknowledged or in downtime are
-  faded. Arrows take the colour of the host they point at.
+  faded.
+- **Arrows:** blue between hosts of the group, gray when a host outside the group is at either end (a dependency
+  that ties other hosts into the graph). An arrow into a host that is down or unreachable takes that host's colour
+  either way.
 - **Service problems:** a ring around a host's dot shows its worst service problem: red for critical, orange for
   warning, purple for unknown. The ring is solid while any problem is unhandled, and dashed and faded when all of
   them are acknowledged or in downtime. A legend in the bottom-left corner explains the colours.
