@@ -27,9 +27,10 @@
         critical: "#ff5566",
         unknown: "#aa44ff",
         edge: "#00c3ed",
-        // Arrows with a host outside the group at either end: a gray that
-        // stays visible on Icinga Web's dark and light themes
-        edgeOutside: "#7f8792"
+        // Arrows with a host outside the group at either end: a gray with the
+        // same lightness (relative luminance) as the blue above, drawn at the
+        // same width and opacity, so neither looks bolder
+        edgeOutside: "#adb3bc"
     };
 
     function stateName(node) {
@@ -694,7 +695,7 @@
     function measureLabels(nodes) {
         const ctx = document.createElement("canvas").getContext("2d");
         return new Map(nodes.map(n => {
-            ctx.font = (n.synthetic ? "bold" : "italic") + " " + FONT_SIZE + "px sans-serif";
+            ctx.font = ((n.inGroup !== undefined ? n.inGroup : n.synthetic) ? "bold" : "italic") + " " + FONT_SIZE + "px sans-serif";
             return [n.name, ctx.measureText(n.label).width];
         }));
     }
@@ -1318,7 +1319,11 @@
                 if (!hasData) return;
                 const token = ++drawToken;
                 const data = visibleData();
-                const nodes = (data.nodes || []).map(n => Object.assign({}, n));
+                // Drawn as a member: hosts of the configured group, and hosts
+                // of any group selected in the picker or URL
+                const nodes = (data.nodes || []).map(n => Object.assign({}, n, {
+                    inGroup: !!n.synthetic || (n.groups || []).some(group => selectedGroups.includes(group))
+                }));
                 const links = data.links || [];
                 emptyMessage.hidden = nodes.length > 0;
                 emptyMessage.textContent = `No hosts found in the "${hostGroup}" host group.`;
@@ -1385,11 +1390,11 @@
                 // dependencies with a host outside the group at either end
                 // (gray). Arrows into a host that is down or unreachable keep
                 // that colour either way.
-                const outside = e => !childOf(e).synthetic
-                    || e.parents.some(p => nodeByName.has(p) && !nodeByName.get(p).synthetic);
+                const outside = e => !childOf(e).inGroup
+                    || e.parents.some(p => nodeByName.has(p) && !nodeByName.get(p).inGroup);
                 const arrowColour = e => isProblem(childOf(e)) ? stateColor(childOf(e))
                     : outside(e) ? COLOURS.edgeOutside : COLOURS.edge;
-                const arrowOpacity = e => !isProblem(childOf(e)) ? (outside(e) ? 0.75 : 0.5)
+                const arrowOpacity = e => !isProblem(childOf(e)) ? 0.5
                     : isHandled(childOf(e)) ? 0.35 : 0.85;
                 const arrowRank = e => !isProblem(childOf(e)) ? 0 : isHandled(childOf(e)) ? 1 : 2;
 
@@ -1444,7 +1449,7 @@
 
                 const circles = node.append("circle")
                     .attr("r", 5)
-                    .attr("stroke", d => d.synthetic ? "none" : textColor)
+                    .attr("stroke", d => d.inGroup ? "none" : textColor)
                     .attr("stroke-dasharray", "2,2");
 
                 // A plate in the page background behind each name, so arrows
@@ -1460,8 +1465,8 @@
                     .attr("x", -LABEL_OFFSET)
                     .attr("dy", "0.32em")
                     .attr("text-anchor", "end")
-                    .attr("font-weight", d => d.synthetic ? "bold" : "normal")
-                    .attr("font-style", d => d.synthetic ? "normal" : "italic")
+                    .attr("font-weight", d => d.inGroup ? "bold" : "normal")
+                    .attr("font-style", d => d.inGroup ? "normal" : "italic")
                     .text(d => d.label);
 
                 // Size each plate to its name as drawn
@@ -1485,7 +1490,8 @@
                         stateName(d) === "unreachable" ? "(down because a parent is down)" : null,
                         servicesText(serviceSummary(d), notifiedOnly),
                         d.zone ? "zone: " + d.zone : null,
-                        d.synthetic ? null : "not in the " + hostGroup + " host group"
+                        d.inGroup ? null : "not in the " + hostGroup + " host group"
+                            + (selectedGroups.length ? " or the selected groups" : "")
                     ].filter(Boolean).join("\n"));
                     const ringState = d => {
                         const summary = serviceSummary(d);
@@ -1501,8 +1507,8 @@
                         .attr("fill", d => stateColor(d))
                         .attr("fill-opacity", d => isHandled(d) ? 0.45 : 1);
                     labels
-                        .attr("fill", d => d.synthetic ? stateColor(d) : textColor)
-                        .attr("opacity", d => (d.synthetic ? 1 : 0.6) * (isHandled(d) ? 0.6 : 1));
+                        .attr("fill", d => d.inGroup ? stateColor(d) : textColor)
+                        .attr("opacity", d => (d.inGroup ? 1 : 0.6) * (isHandled(d) ? 0.6 : 1));
                     edgePaths
                         .attr("stroke", arrowColour)
                         .attr("opacity", arrowOpacity)
