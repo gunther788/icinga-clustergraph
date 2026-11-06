@@ -59,6 +59,20 @@ check('select: only links touching synthetic hosts, without duplicates', $select
 ]);
 check('select: group membership', array_map('strval', array_keys($selection['synthetic'])), ['probe-a', 'probe-b', '123']);
 
+// --- addLinksAmong() --------------------------------------------------------
+
+$among = GraphBuilder::addLinksAmong($selection, [
+    dependency('fw-1', 'db-1'),       // both drawn, neither in the group: added
+    dependency('fw-1', 'unrelated'),  // 'unrelated' isn't drawn: ignored
+    dependency('fw-1', 'probe-a'),    // already there: not duplicated
+    dependency('db-1', 'db-1'),       // self-loop: ignored
+    dependency('fw-1', 'db-1', 'disk') // service dependency: ignored
+]);
+check('links among drawn hosts: only the new one added', $among['links'], array_merge($selection['links'], [
+    ['source' => 'fw-1', 'target' => 'db-1']
+]));
+check('links among drawn hosts: hosts unchanged', $among['names'], $selection['names']);
+
 // --- summariseServices() ----------------------------------------------------
 
 $summary = GraphBuilder::summariseServices([

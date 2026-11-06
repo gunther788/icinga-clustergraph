@@ -9,7 +9,9 @@ namespace Icinga\Module\Topologygraph\Common;
  * 1. the hosts in the group
  * 2. the host-to-host dependencies that touch them
  * 3. the hosts outside the group at the other end of those dependencies
- * 4. the services of all drawn hosts (optional: without permission, or on
+ * 4. the host-to-host dependencies between those outside hosts (adds lines
+ *    between hosts already drawn, never more hosts)
+ * 5. the services of all drawn hosts (optional: without permission, or on
  *    error, the graph is built without service details)
  *
  * The API is passed in as a callable so this can be tested without Icinga.
@@ -57,6 +59,20 @@ final class GraphSource
             'objects/hosts?' . self::HOST_ATTRS,
             ['filter' => 'host.name in names', 'filter_vars' => ['names' => $neighbours]]
         ) : [];
+
+        // Dependencies between two drawn hosts outside the group (e.g. a host
+        // in the DMZ and one in the backend) touch no group host, so step 2
+        // doesn't find them
+        if (count($neighbours) > 1) {
+            $selection = GraphBuilder::addLinksAmong($selection, $api(
+                'objects/dependencies?' . self::DEPENDENCY_ATTRS,
+                [
+                    'filter'      => 'dependency.child_service_name == ""'
+                        . ' && dependency.parent_host_name in names && dependency.child_host_name in names',
+                    'filter_vars' => ['names' => $neighbours]
+                ]
+            ));
+        }
 
         try {
             $services = $api(

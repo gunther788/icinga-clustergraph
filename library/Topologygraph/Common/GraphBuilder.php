@@ -67,6 +67,41 @@ final class GraphBuilder
     }
 
     /**
+     * Add the host-to-host dependencies between hosts already in the
+     * selection that select() left out (those with neither end in the group,
+     * e.g. between two hosts outside the group that are both drawn). Never
+     * adds hosts.
+     *
+     * @param array $selection    Result of select()
+     * @param array $dependencies API results from objects/dependencies
+     *
+     * @return array The selection with the extra links
+     */
+    public static function addLinksAmong(array $selection, array $dependencies)
+    {
+        $drawn = array_flip($selection['names']);
+        $links = [];
+        foreach ($selection['links'] as $link) {
+            $links[$link['source'] . "\0" . $link['target']] = $link;
+        }
+        foreach ($dependencies as $dependency) {
+            $attrs = $dependency['attrs'] ?? [];
+            if (! empty($attrs['child_service_name'])) {
+                continue;
+            }
+            $parent = (string) ($attrs['parent_host_name'] ?? '');
+            $child = (string) ($attrs['child_host_name'] ?? '');
+            if ($parent === $child || ! isset($drawn[$parent]) || ! isset($drawn[$child])) {
+                continue;
+            }
+            $links[$parent . "\0" . $child] = ['source' => $parent, 'target' => $child];
+        }
+        $selection['links'] = array_values($links);
+
+        return $selection;
+    }
+
+    /**
      * Summarise services per host.
      *
      * A service is pending until its first check, and a problem (warning,
