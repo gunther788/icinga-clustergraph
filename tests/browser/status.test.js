@@ -82,7 +82,8 @@ test('host states, handled problems and service rings', async () => {
         assert.match(s['standalone'].title, /services: not available/);
 
         const legend = await page.$$eval('.topologygraph-legend span', items => items.map(i => i.textContent));
-        assert.deepEqual(legend, ['up', 'down', 'unreachable (parent down)', 'acknowledged / downtime', 'pending', 'service problem']);
+        assert.deepEqual(legend, ['up', 'down', 'unreachable (parent down)', 'acknowledged / downtime', 'pending',
+            'service problem', 'within the host group', 'to or from other hosts']);
         assert.deepEqual(errors, []);
     } finally {
         await close();
@@ -150,5 +151,30 @@ test('services with notifications disabled can be left out, via the URL or the c
         assert.equal(await url(viaCheckbox.page), '/icingaweb2/topologygraph');
     } finally {
         await viaCheckbox.close();
+    }
+});
+
+test('arrows to or from hosts outside the group are gray', async () => {
+    // In the small sample core-router is not in the group; it is the parent of fw-1 and fw-2
+    const data = fixture('small');
+    const {page, errors, close} = await open({data});
+    try {
+        const a = await arrowsInto(page);
+        assert.ok(a['fw-1'].every(x => x.stroke === '#7f8792'), 'from a host outside the group: gray');
+        assert.ok(a['fw-2'].every(x => x.stroke === '#7f8792'));
+        assert.ok(a['lb-1'].every(x => x.stroke === '#00c3ed'), 'between hosts of the group: blue');
+        assert.ok(a['db-1'].every(x => x.stroke === '#00c3ed'));
+        assert.deepEqual(errors, []);
+    } finally {
+        await close();
+    }
+
+    // A problem still shows in its own colour on a gray arrow
+    data.nodes.find(n => n.name === 'fw-1').state = 1;
+    const down = await open({data});
+    try {
+        assert.ok((await arrowsInto(down.page))['fw-1'].every(x => x.stroke === '#ff5566'), 'into a down host: red');
+    } finally {
+        await down.close();
     }
 });
