@@ -76,6 +76,9 @@ test('a click opens a host, a drag does not', async () => {
         await page.mouse.move(box.x + 80, box.y + 20, {steps: 5});
         await page.mouse.up();
         assert.equal(await page.evaluate(() => location.hash), '', 'drag does not follow the link');
+        // d3 blocks the click that ends a drag until its next timer tick; a
+        // person never clicks again that fast
+        await page.waitForTimeout(150);
         const moved = await dot.boundingBox();
         await page.mouse.click(moved.x + moved.width / 2, moved.y + moved.height / 2);
         assert.equal(await page.evaluate(() => location.hash), '#lb-1', 'click follows the link');

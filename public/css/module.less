@@ -170,6 +170,100 @@
   }
 }
 
+// Loading progress: a card in the middle while the first drawing is being
+// made, then a slim bar along the top while the graph is laid out again
+.topologygraph-loading {
+  position: absolute;
+  top: 38px;
+  left: 8px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  opacity: 0.85;
+  pointer-events: none;
+
+  &[hidden] {
+    display: none;
+  }
+
+  .topologygraph-loading-bar {
+    position: relative;
+    width: 120px;
+    height: 4px;
+    overflow: hidden;
+    background: rgba(128, 128, 128, 0.25);
+    border-radius: 2px;
+  }
+
+  .topologygraph-loading-fill {
+    position: relative;
+    height: 100%;
+    overflow: hidden;
+    background: #00c3ed;
+    border-radius: 2px;
+    transition: width 0.3s ease;
+
+    // A highlight sweeping along the bar, so it visibly keeps moving
+    &::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      width: 60%;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.7), transparent);
+      animation: topologygraph-sweep 1.2s linear infinite;
+    }
+  }
+}
+
+.topologygraph-loading-first {
+  top: 50%;
+  left: 50%;
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 260px;
+  padding: 14px 18px;
+  font-size: 13px;
+  opacity: 1;
+  background: rgba(128, 128, 128, 0.12);
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  border-radius: 6px;
+  transform: translate(-50%, -50%);
+
+  .topologygraph-loading-bar {
+    width: auto;
+    height: 6px;
+    border-radius: 3px;
+  }
+}
+
+.topologygraph-loading-failed {
+  pointer-events: auto;
+
+  .topologygraph-loading-bar {
+    display: none;
+  }
+}
+
+@keyframes topologygraph-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(170%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .topologygraph-loading .topologygraph-loading-fill::after {
+    animation: none;
+  }
+}
+
 .topologygraph-empty {
   position: absolute;
   top: 50%;
