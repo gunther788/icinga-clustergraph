@@ -56,15 +56,24 @@ The layout tries to:
   - Drag to move the diagram, or hold Shift and scroll.
 - **Buttons** (top right): zoom in, zoom out, **Fit** (the whole diagram), **1:1** (100%) and **Full screen** (Esc to
   leave).
-- **Showing a subset:** the host button (it reads **All hosts ▾** until you choose) opens a checklist of every host
-  without children, with a filter box. Tick one or more hosts to show only them and everything above them: their
-  parents, their parents' parents, and so on. **Show all** goes back to everything.
-- **Bookmarking a subset:** the selection is kept in the page address as repeated `host` parameters. Bookmark or
-  share it like any other link, for example:
+- **Showing a subset:** the host button (it reads **All hosts ▾** until you choose) opens a checklist with a filter
+  box and two sections:
+  - **Host groups:** every group that a drawn host belongs to. Ticking a group works exactly like ticking every
+    drawn host in it.
+  - **Hosts:** every host without children.
+
+  The graph shows the ticked hosts, and the hosts in ticked groups, plus everything above them: their parents, their
+  parents' parents, and so on. Groups and hosts can be combined. **Show all** goes back to everything.
+- **Bookmarking a subset:** the selection is kept in the page address as repeated `host` and `hostgroup`
+  parameters. Bookmark or share it like any other link, for example:
 
   ```
   https://icinga.example.com/icingaweb2/topologygraph?host=db-1&host=cache-1
+  https://icinga.example.com/icingaweb2/topologygraph?hostgroup=databases
+  https://icinga.example.com/icingaweb2/topologygraph?host=queue&hostgroup=databases
   ```
+
+  Group names are the Icinga object names, not display names. Unknown hosts and groups in the address are ignored.
 
 - **Ignoring services without notifications:** tick **Notified services only** to leave out services that have
   notifications disabled. They then don't count towards the service rings or the counts in the hover text. The

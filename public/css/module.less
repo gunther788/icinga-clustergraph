@@ -149,8 +149,32 @@
   }
 }
 
-.topologygraph-picker-list {
+// Groups and hosts share one scrolling area
+.topologygraph-picker-lists {
+  min-height: 0;
   overflow-y: auto;
+}
+
+.topologygraph-picker-heading {
+  margin: 4px 0 2px;
+  font-size: 11px;
+  font-weight: bold;
+  text-transform: uppercase;
+  opacity: 0.6;
+
+  &[hidden] {
+    display: none;
+  }
+}
+
+.topologygraph-picker-groups {
+  margin-bottom: 4px;
+}
+
+.topologygraph-picker-list {
+  &[hidden] {
+    display: none;
+  }
 
   label {
     display: block;

@@ -162,6 +162,8 @@ final class GraphBuilder
                 // The same, counting only services with notifications enabled
                 'services_notified' => $notifiedSummary === null ? null : ($notifiedSummary[$name] ?? $noServices),
                 'synthetic'    => isset($selection['synthetic'][$name]),
+                // Host groups the host is in, for selecting a subset by group
+                'groups'       => array_values(array_map('strval', (array) ($attrs['groups'] ?? []))),
                 'link'         => $hostPath . rawurlencode($name)
             ];
         }

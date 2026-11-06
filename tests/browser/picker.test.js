@@ -76,3 +76,77 @@ test('unknown hosts in the URL are dropped', async () => {
         await close();
     }
 });
+
+// random40 with host groups: three databases, the messaging hosts, and the probes
+function withGroups() {
+    const data = fixture('random40');
+    data.nodes.forEach(n => {
+        n.groups = [];
+        if (/^db-/.test(n.name)) n.groups.push('databases');
+        if (n.name === 'queue' || n.name === 'cache') n.groups.push('messaging');
+        if (/^probe-/.test(n.name)) n.groups.push('synthetic');
+    });
+    return data;
+}
+
+test('a host group in the URL works like ticking its hosts', async () => {
+    const data = withGroups();
+    const byGroup = await open({data, query: '?hostgroup=databases'});
+    const byHosts = await open({data, query: '?host=db-a&host=db-b&host=db-c'});
+    try {
+        const viaGroup = await drawnHosts(byGroup.page);
+        assert.ok(viaGroup.length > 3 && viaGroup.length < data.nodes.length, 'a subset including the chains above');
+        assert.deepEqual(viaGroup, await drawnHosts(byHosts.page), 'same hosts as ticking db-a, db-b and db-c');
+        const s = await state(byGroup.page);
+        assert.equal(s.url, PAGE + '?hostgroup=databases');
+        assert.equal(s.icingaUrl, PAGE + '?hostgroup=databases');
+        assert.equal(s.button, 'databases ▾');
+        assert.deepEqual(await byGroup.page.$$eval('.topologygraph-picker-groups input:checked', i => i.map(x => x.value)), ['databases']);
+        assert.deepEqual(byGroup.errors, []);
+    } finally {
+        await byGroup.close();
+        await byHosts.close();
+    }
+});
+
+test('ticking host groups, combined with hosts', async () => {
+    const {page, close} = await open({data: withGroups()});
+    try {
+        await page.click('.topologygraph-picker-button');
+        const groups = await page.$$eval('.topologygraph-picker-groups label', ls => ls.map(l => l.textContent.trim()));
+        assert.deepEqual(groups, ['databases', 'messaging', 'synthetic'], 'every group of a drawn host');
+
+        await page.click('.topologygraph-picker-groups input[value="messaging"]');
+        await page.waitForTimeout(400);
+        assert.equal((await state(page)).url, PAGE + '?hostgroup=messaging');
+        const messaging = await drawnHosts(page);
+        assert.ok(messaging.includes('queue') && messaging.includes('cache') && !messaging.includes('db-a'));
+
+        await page.click('.topologygraph-picker-list:not(.topologygraph-picker-groups) input[value="db-a"]');
+        await page.waitForTimeout(400);
+        const both = await state(page);
+        assert.equal(both.url, PAGE + '?host=db-a&hostgroup=messaging', 'hosts and groups together');
+        assert.equal(both.button, 'messaging, db-a ▾');
+        assert.ok((await drawnHosts(page)).includes('db-a'));
+
+        await page.fill('.topologygraph-picker-head input', 'data');
+        const visible = await page.$$eval('.topologygraph-picker-lists label:not([hidden])', ls => ls.map(l => l.textContent.trim()));
+        assert.deepEqual(visible, ['databases'], 'the filter covers groups too');
+        await page.fill('.topologygraph-picker-head input', '');
+
+        await page.click('.topologygraph-picker-head button');
+        await page.waitForTimeout(400);
+        assert.equal((await state(page)).url, PAGE, 'Show all clears hosts and groups');
+    } finally {
+        await close();
+    }
+});
+
+test('unknown host groups in the URL are dropped', async () => {
+    const {page, close} = await open({data: withGroups(), query: '?hostgroup=nope&hostgroup=databases'});
+    try {
+        assert.equal((await state(page)).url, PAGE + '?hostgroup=databases');
+    } finally {
+        await close();
+    }
+});
