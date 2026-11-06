@@ -1392,6 +1392,7 @@
                     .selectAll("rect")
                     .data(geo.boxes)
                     .join("rect")
+                    .attr("class", "topologygraph-box")
                     .attr("x", b => b.x0)
                     .attr("y", b => b.y0)
                     .attr("width", b => b.x1 - b.x0)
@@ -1435,17 +1436,32 @@
                     .attr("stroke", d => d.synthetic ? "none" : textColor)
                     .attr("stroke-dasharray", "2,2");
 
+                // A plate in the page background behind each name, so arrows
+                // passing behind it don't hide the text. (An outline stroke on
+                // the text itself would also be painted over the browser's
+                // find-in-page and selection highlights, and smear them.)
+                const plates = node.append("rect")
+                    .attr("class", "topologygraph-label-plate")
+                    .attr("fill", background || "none")
+                    .attr("rx", 2);
+
                 const labels = node.append("text")
                     .attr("x", -LABEL_OFFSET)
                     .attr("dy", "0.32em")
                     .attr("text-anchor", "end")
                     .attr("font-weight", d => d.synthetic ? "bold" : "normal")
                     .attr("font-style", d => d.synthetic ? "normal" : "italic")
-                    .attr("stroke", background || "none")
-                    .attr("stroke-width", 3)
-                    .attr("stroke-linejoin", "round")
-                    .attr("paint-order", "stroke")
                     .text(d => d.label);
+
+                // Size each plate to its name as drawn
+                labels.each(function () {
+                    const box = this.getBBox();
+                    d3.select(this.parentNode).select("rect.topologygraph-label-plate")
+                        .attr("x", box.x - 2)
+                        .attr("y", box.y + 1)
+                        .attr("width", box.width + 4)
+                        .attr("height", Math.max(0, box.height - 2));
+                });
 
                 // Everything that depends on host states, so a refresh can
                 // recolour the drawing in place without touching the layout
