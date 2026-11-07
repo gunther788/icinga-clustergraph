@@ -44,7 +44,8 @@ function fixture(name) {
  * Open the graph page.
  *
  * @param {object} options
- * @param {object} options.data      Graph data served by /index/data (can be changed later via server.data)
+ * @param {object|function} options.data Graph data served by /index/data (can be changed later via server.data),
+ *                                   or a function of the request's URLSearchParams returning it
  * @param {string} [options.query]   Query string for the page URL, e.g. "?host=a"
  * @param {object} [options.viewport] Browser window size
  * @param {boolean} [options.clock]  Install Playwright's fake clock before loading
@@ -60,7 +61,7 @@ async function open({data, query = '', viewport = {width: 1280, height: 720}, cl
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
 
-    const server = {data, fail: false, fetches: 0, elkFail, elkRequests: 0, delay};
+    const server = {data, fail: false, fetches: 0, queries: [], elkFail, elkRequests: 0, delay};
     const html = `<!doctype html><html><head><meta charset="utf-8"><style>${ICINGA_CSS}${css}</style></head><body>
         <div id="header"></div><div id="sidebar"></div>
         <div class="container" id="col1" data-icinga-url="${PAGE}">
@@ -82,8 +83,10 @@ async function open({data, query = '', viewport = {width: 1280, height: 720}, cl
         if (url.pathname === PAGE + '/index/data') {
             server.fetches++;
             if (server.delay) await new Promise(resolve => setTimeout(resolve, server.delay));
+            server.queries.push(url.search);
             if (server.fail) return route.fulfill({status: 500, body: 'failed'});
-            return route.fulfill({contentType: 'application/json', body: JSON.stringify(server.data)});
+            const body = typeof server.data === 'function' ? server.data(url.searchParams) : server.data;
+            return route.fulfill({contentType: 'application/json', body: JSON.stringify(body)});
         }
         if (url.pathname === PAGE + '/index/elk') {
             server.elkRequests = (server.elkRequests || 0) + 1;

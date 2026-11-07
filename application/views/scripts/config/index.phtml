@@ -5,14 +5,15 @@
 <?php endif ?>
 <div class="content">
     <p>
-        Enter the details of an Icinga 2 API user that may read hosts, dependencies and services. Without the
-        service permission the graph still works, but without service problem rings. Example:
+        Enter the details of an Icinga 2 API user that may read hosts, host groups, dependencies and services. Without the
+        service permission the graph still works, but without service problem rings; without the host group
+        permission, only the default host group can be graphed. Example:
     <pre>
 
 object ApiUser "TOPOLOGYGRAPH_USERNAME_HERE" {
   password = "SECURE_PASSWORD_HERE"
 
-  permissions = [ "objects/query/Host", "objects/query/Dependency", "objects/query/Service" ]
+  permissions = [ "objects/query/Host", "objects/query/HostGroup", "objects/query/Dependency", "objects/query/Service" ]
 }
 
         </pre>

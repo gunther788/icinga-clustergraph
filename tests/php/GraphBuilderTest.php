@@ -57,7 +57,15 @@ check('select: only links touching synthetic hosts, without duplicates', $select
     ['source' => 'fw-1', 'target' => 'probe-a'],
     ['source' => 'probe-b', 'target' => 'db-1']
 ]);
-check('select: group membership', array_map('strval', array_keys($selection['synthetic'])), ['probe-a', 'probe-b', '123']);
+check('select: group membership', array_map('strval', array_keys($selection['members'])), ['probe-a', 'probe-b', '123']);
+
+$both = GraphBuilder::select(
+    [host('probe-a', ['groups' => ['synthetic']]), host('web-1', ['groups' => ['web']]), host('db-1')],
+    [dependency('probe-a', 'db-1'), dependency('db-1', 'web-1')],
+    ['synthetic', 'web']
+);
+check('select: several groups are all members', array_keys($both['members']), ['probe-a', 'web-1']);
+check('select: neighbours of any of them', $both['names'], ['probe-a', 'web-1', 'db-1']);
 
 // --- addLinksAmong() --------------------------------------------------------
 
