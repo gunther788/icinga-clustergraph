@@ -150,3 +150,19 @@ test('unknown host groups in the URL are dropped', async () => {
         await close();
     }
 });
+
+test('the explain link follows the selection and keeps hosts and groups the graph lacks', async () => {
+    const {page, close} = await open({data: withGroups(), query: '?hostgroup=nope&hostgroup=databases&host=ghost'});
+    const href = () => page.$eval('.topologygraph-picker-explain', a => a.getAttribute('href'));
+    try {
+        assert.equal(await href(), PAGE + '/index/explain?host=ghost&hostgroup=databases&hostgroup=nope',
+            'dropped from the view, but still explained');
+        await page.click('.topologygraph-picker-button');
+        await page.click('.topologygraph-picker-groups input[value="messaging"]');
+        await page.waitForTimeout(200);
+        assert.equal(await href(), PAGE + '/index/explain?host=ghost&hostgroup=databases&hostgroup=messaging&hostgroup=nope');
+        assert.equal(await page.$eval('.topologygraph-picker-explain', a => a.target), '_blank');
+    } finally {
+        await close();
+    }
+});

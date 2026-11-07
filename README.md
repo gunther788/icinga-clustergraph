@@ -193,6 +193,38 @@ service details are not available.
 
 Font size and spacing are constants (`FONT_SIZE` and `BASE`) near the top of `public/js/module.js`.
 
+## Why is a host missing, or gray?
+
+The graph has the hosts in the host group from the module settings, plus the hosts with a host-to-host dependency on
+one of them. Only hosts in the settings group are drawn as members (bold, blue arrows); all others are drawn as
+outside hosts (gray). Selecting hosts or host groups, in the picker or with `host=` and `hostgroup=`, only picks from
+the hosts already in the graph. It never adds hosts, and never changes how they are drawn. So a host in a selected
+group is missing if it has no dependency to or from a host of the settings group, and it is gray if it isn't in the
+settings group itself.
+
+To see this for your hosts, open **Explain this view as JSON** at the foot of the picker, or the address directly:
+
+```
+https://icinga.example.com/icingaweb2/topologygraph/index/explain?hostgroup=webservers
+```
+
+It takes the same `host` and `hostgroup` parameters as the graph page and returns:
+
+- `hosts`: every drawn host, with
+  - `drawn_as` (`member` or `outside`) and `why_drawn`, for example `in the synthetic host group` or `child of
+    probe-a`;
+  - `groups`, `parents` and `children`;
+  - `shown` and `why_shown` for the selection, for example `in selected host group webservers` or `parent of shown
+    host web-1`.
+- `links`: every line, and whether it `touches a member` or is `between two outside hosts`.
+- `hostgroups`: for each selected group, how many hosts Icinga has in it, which are drawn as members, which as
+  outside hosts, and which are not drawn.
+- `selected_but_not_drawn`: the selected hosts and group members that are not in the graph, with the reason and
+  their host-to-host dependencies.
+
+This makes a few more API requests than the graph does: the members of each selected group, the selected hosts
+that aren't drawn, and their dependencies. These answers are not cached.
+
 ## Load on the Icinga API
 
 Each update makes up to five small requests, each filtered on the Icinga side:

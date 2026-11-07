@@ -1652,7 +1652,28 @@
             const lists = document.createElement("div");
             lists.className = "topologygraph-picker-lists";
             lists.append(groupHeading, groupList, hostHeading, list);
-            panel.append(panelHead, lists);
+            // The data behind the current view, with why each host is (or
+            // isn't) drawn, for comparing with Icinga or other inventories
+            const explainLink = document.createElement("a");
+            explainLink.className = "topologygraph-picker-explain";
+            explainLink.textContent = "Explain this view as JSON";
+            explainLink.title = "Which hosts are drawn and why, and which selected hosts are missing";
+            explainLink.target = "_blank";
+            explainLink.rel = "noopener";
+            const updateExplainLink = () => {
+                // Hosts and groups from the page address that aren't in the
+                // graph are dropped from the selection; those are the ones
+                // most worth explaining, so keep them here
+                const inList = (container, name) => [...container.querySelectorAll("input")].some(box => box.value === name);
+                const hosts = new Set(selected.concat(urlState.hosts.filter(name => !inList(list, name))));
+                const groups = new Set(selectedGroups.concat(urlState.hostgroups.filter(name => !inList(groupList, name))));
+                const params = new URLSearchParams();
+                hosts.forEach(name => params.append("host", name));
+                groups.forEach(name => params.append("hostgroup", name));
+                const query = params.toString();
+                explainLink.href = window.location.pathname + "/index/explain" + (query ? "?" + query : "");
+            };
+            panel.append(panelHead, lists, explainLink);
 
             const applySelection = () => {
                 const parts = [];
@@ -1664,6 +1685,7 @@
                 list.querySelectorAll("input").forEach(box => box.checked = selected.includes(box.value));
                 groupList.querySelectorAll("input").forEach(box => box.checked = selectedGroups.includes(box.value));
                 updateUrl();
+                updateExplainLink();
             };
             const choose = (names, groups) => {
                 selected = names;

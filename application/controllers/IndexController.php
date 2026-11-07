@@ -8,6 +8,7 @@ ini_set('display_errors', '1');
 
 use Icinga\Application\Icinga;
 use Icinga\Application\Logger;
+use Icinga\Module\Topologygraph\Common\GraphExplain;
 use Icinga\Module\Topologygraph\Common\GraphSource;
 use Icinga\Module\Topologygraph\Common\IcingaApi;
 use Icinga\Module\Topologygraph\Common\JsonCache;
@@ -61,26 +62,60 @@ class IndexController extends Controller
 
     public function dataAction()
     {
-        // Configuration
+        list($graph, $group, $refresh) = $this->graph();
+        $graph['hostgroup'] = $group;
+        $graph['refresh'] = $refresh;
+        $this->_helper->json($graph);
+    }
 
+    /**
+     * The graph as JSON with explanations: why each host is drawn, how
+     * (member or outside), and which of them a selection shows. Takes the same
+     * host= and hostgroup= parameters as the graph page, and lists the hosts
+     * those select that are not in the graph, with the reason.
+     */
+    public function explainAction()
+    {
+        list($graph, $group) = $this->graph();
+        $api = $this->apiCallable(new IcingaApi());
+        $explanation = GraphExplain::explain(
+            $graph,
+            $group,
+            $this->params->getValues('host'),
+            $this->params->getValues('hostgroup'),
+            $api
+        );
+        $explanation = ['generated' => date('c')] + $explanation;
+
+        header('Content-Type: application/json; charset=utf-8');
+        header('Cache-Control: no-store');
+        echo json_encode($explanation, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    /**
+     * The graph for the host group from the module settings, shared through
+     * the cache
+     *
+     * @return array [graph, host group, refresh interval]
+     */
+    private function graph()
+    {
         $config = \Icinga\Application\Config::module('topologygraph');
         $ICINGA_API_ENDPOINT = $config->get('api', 'host');
         $ICINGA_API_USER = $config->get('api', 'username');
         $ICINGA_API_PASSWORD = $config->get('api', 'password');
         $ICINGAWEB_TYPE = $config->get('graph', 'ui');
-        
+
         $ICINGAWEB_BASEURL = Icinga::app()->getRequest()->getBaseUrl() . '/';
+        $ICINGAWEB_HOST_PATH = $ICINGAWEB_BASEURL . 'icingadb/host?name=';
         if ($ICINGAWEB_TYPE == 'icingaweb2') {
             $ICINGAWEB_HOST_PATH = $ICINGAWEB_BASEURL . 'monitoring/host/show?host=';
-        } elseif ($ICINGAWEB_TYPE == 'icingadb') {
-            $ICINGAWEB_HOST_PATH = $ICINGAWEB_BASEURL . 'icingadb/host?name=';  
         }
-        
 
         if (!$ICINGA_API_ENDPOINT || !$ICINGA_API_USER || !$ICINGA_API_PASSWORD) {
             throw new \Exception("Please configure the module in module settings.");
         }
-
 
         // Host group to draw and refresh interval, from the module settings
         $group = trim((string) $config->get('graph', 'hostgroup', 'synthetic'));
@@ -96,16 +131,10 @@ class IndexController extends Controller
         $cacheKey = json_encode([
             $ICINGA_API_ENDPOINT, $config->get('api', 'port'), $ICINGA_API_USER, $group, $ICINGAWEB_HOST_PATH
         ]);
-        $api = new IcingaApi();
+        $api = $this->apiCallable(new IcingaApi());
         $graph = $cache->remember($cacheKey, intdiv($refresh, 2), function () use ($api, $group, $ICINGAWEB_HOST_PATH) {
             return GraphSource::fetch(
-                function ($endpoint, $body) use ($api) {
-                    $results = $api->sendCommand('GET', $endpoint, $body);
-                    if (! is_array($results)) {
-                        throw new \Exception("Failed to fetch or decode data from the Icinga2 API.");
-                    }
-                    return $results;
-                },
+                $api,
                 $group,
                 $ICINGAWEB_HOST_PATH,
                 function (\Exception $e) {
@@ -114,11 +143,18 @@ class IndexController extends Controller
             );
         });
 
-        $graph['hostgroup'] = $group;
-        $graph['refresh'] = $refresh;
-        $this->_helper->json($graph);
+        return [$graph, $group, $refresh];
     }
 
-
+    private function apiCallable(IcingaApi $api)
+    {
+        return function ($endpoint, $body) use ($api) {
+            $results = $api->sendCommand('GET', $endpoint, $body);
+            if (! is_array($results)) {
+                throw new \Exception("Failed to fetch or decode data from the Icinga2 API.");
+            }
+            return $results;
+        };
+    }
 }
 
