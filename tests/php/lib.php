@@ -6,6 +6,8 @@
 
 require_once __DIR__ . '/../../library/Topologygraph/Common/GraphBuilder.php';
 require_once __DIR__ . '/../../library/Topologygraph/Common/GraphSource.php';
+require_once __DIR__ . '/../../library/Topologygraph/Common/GraphExplain.php';
+require_once __DIR__ . '/../../library/Topologygraph/Common/HostGroupPatterns.php';
 require_once __DIR__ . '/../../library/Topologygraph/Common/JsonCache.php';
 
 $GLOBALS['failures'] = 0;

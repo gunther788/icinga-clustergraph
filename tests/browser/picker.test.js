@@ -89,63 +89,115 @@ function withGroups() {
     return data;
 }
 
-test('a host group in the URL works like ticking its hosts', async () => {
-    const data = withGroups();
-    const byGroup = await open({data, query: '?hostgroup=databases'});
-    const byHosts = await open({data, query: '?host=db-a&host=db-b&host=db-c'});
+// A server offering three host groups (synthetic the default) that marks
+// the hosts of the graphed groups as members, as the real one does
+function groupServer(data = withGroups()) {
+    const offered = ['synthetic', 'databases', 'messaging'];
+    return params => {
+        const asked = params.getAll('hostgroup');
+        const chosen = asked.filter(g => offered.includes(g));
+        const graphed = chosen.length ? chosen : ['synthetic'];
+        return Object.assign({}, data, {
+            nodes: data.nodes.map(n => Object.assign({}, n, {member: n.groups.some(g => graphed.includes(g))})),
+            hostgroups: graphed,
+            hostgroups_ignored: asked.filter(g => !offered.includes(g)),
+            hostgroups_offered: offered.map(name => ({name, label: name === 'databases' ? 'Databases' : name})),
+            hostgroup_default: 'synthetic'
+        });
+    };
+}
+
+const groupState = page => page.evaluate(() => ({
+    button: document.querySelector('.topologygraph-hostgroup-button').textContent,
+    hidden: document.querySelector('.topologygraph-hostgroup-button').hidden,
+    checked: [...document.querySelectorAll('.topologygraph-hostgroup-list input:checked')].map(i => i.value),
+    url: location.pathname + location.search,
+    note: document.querySelector('.topologygraph-hint').textContent
+}));
+
+test('the host group picker graphs the chosen groups', async () => {
+    const {page, server, errors, close} = await open({data: groupServer()});
     try {
-        const viaGroup = await drawnHosts(byGroup.page);
-        assert.ok(viaGroup.length > 3 && viaGroup.length < data.nodes.length, 'a subset including the chains above');
-        assert.deepEqual(viaGroup, await drawnHosts(byHosts.page), 'same hosts as ticking db-a, db-b and db-c');
-        const s = await state(byGroup.page);
-        assert.equal(s.url, PAGE + '?hostgroup=databases');
-        assert.equal(s.icingaUrl, PAGE + '?hostgroup=databases');
-        assert.equal(s.button, 'databases ▾');
-        assert.deepEqual(await byGroup.page.$$eval('.topologygraph-picker-groups input:checked', i => i.map(x => x.value)), ['databases']);
-        assert.deepEqual(byGroup.errors, []);
-    } finally {
-        await byGroup.close();
-        await byHosts.close();
-    }
-});
+        let s = await groupState(page);
+        assert.equal(s.button, 'synthetic ▾', 'the default to start with');
+        assert.deepEqual(s.checked, ['synthetic']);
+        assert.equal(server.queries[0], '', 'the default needs no parameter');
 
-test('ticking host groups, combined with hosts', async () => {
-    const {page, close} = await open({data: withGroups()});
-    try {
-        await page.click('.topologygraph-picker-button');
-        const groups = await page.$$eval('.topologygraph-picker-groups label', ls => ls.map(l => l.textContent.trim()));
-        assert.deepEqual(groups, ['databases', 'messaging', 'synthetic'], 'every group of a drawn host');
+        await page.click('.topologygraph-hostgroup-button');
+        const listed = await page.$$eval('.topologygraph-hostgroup-list label', ls => ls.map(l => l.textContent.trim()));
+        assert.deepEqual(listed, ['synthetic', 'Databases (databases)', 'messaging'], 'the offered groups');
+        // Two ticks in quick succession load once
+        const before = server.fetches;
+        await page.click('.topologygraph-hostgroup-list input[value="databases"]');
+        await page.click('.topologygraph-hostgroup-list input[value="messaging"]');
+        await page.waitForTimeout(1000);
+        assert.equal(server.fetches, before + 1, 'one load for both ticks');
+        assert.equal(server.queries[server.queries.length - 1], '?hostgroup=synthetic&hostgroup=databases&hostgroup=messaging');
+        s = await groupState(page);
+        assert.equal(s.url, PAGE + '?hostgroup=synthetic&hostgroup=databases&hostgroup=messaging');
+        assert.equal(s.button, '3 host groups ▾');
+        const weight = name => page.$eval(`.topologygraph-viewport a[href="#${name}"] text`, t => t.getAttribute('font-weight'));
+        assert.equal(await weight('db-a'), 'bold', 'hosts of a chosen group are members');
 
-        await page.click('.topologygraph-picker-groups input[value="messaging"]');
-        await page.waitForTimeout(400);
-        assert.equal((await state(page)).url, PAGE + '?hostgroup=messaging');
-        const messaging = await drawnHosts(page);
-        assert.ok(messaging.includes('queue') && messaging.includes('cache') && !messaging.includes('db-a'));
-
-        await page.click('.topologygraph-picker-list:not(.topologygraph-picker-groups) input[value="db-a"]');
-        await page.waitForTimeout(400);
-        const both = await state(page);
-        assert.equal(both.url, PAGE + '?host=db-a&hostgroup=messaging', 'hosts and groups together');
-        assert.equal(both.button, 'messaging, db-a ▾');
-        assert.ok((await drawnHosts(page)).includes('db-a'));
-
-        await page.fill('.topologygraph-picker-head input', 'data');
-        const visible = await page.$$eval('.topologygraph-picker-lists label:not([hidden])', ls => ls.map(l => l.textContent.trim()));
-        assert.deepEqual(visible, ['databases'], 'the filter covers groups too');
-        await page.fill('.topologygraph-picker-head input', '');
-
-        await page.click('.topologygraph-picker-head button');
-        await page.waitForTimeout(400);
-        assert.equal((await state(page)).url, PAGE, 'Show all clears hosts and groups');
+        await page.click('.topologygraph-hostgroup-picker .topologygraph-picker-head button');
+        await page.waitForTimeout(1000);
+        assert.equal(server.queries[server.queries.length - 1], '', 'Default: back to no parameter');
+        s = await groupState(page);
+        assert.equal(s.url, PAGE);
+        assert.deepEqual(s.checked, ['synthetic']);
+        assert.equal(await weight('db-a'), 'normal');
+        assert.deepEqual(errors, []);
     } finally {
         await close();
     }
 });
 
-test('unknown host groups in the URL are dropped', async () => {
-    const {page, close} = await open({data: withGroups(), query: '?hostgroup=nope&hostgroup=databases'});
+test('a bookmarked host group is graphed, and the host checklist narrows within it', async () => {
+    const {page, server, close} = await open({data: groupServer(), query: '?hostgroup=databases&host=queue'});
     try {
-        assert.equal((await state(page)).url, PAGE + '?hostgroup=databases');
+        assert.equal(server.queries[0], '?hostgroup=databases');
+        const s = await groupState(page);
+        assert.equal(s.button, 'Databases ▾');
+        assert.equal(s.url, PAGE + '?host=queue&hostgroup=databases');
+        assert.equal((await state(page)).button, 'queue ▾');
+        assert.ok((await drawnHosts(page)).includes('queue'));
+    } finally {
+        await close();
+    }
+});
+
+test('host groups not offered are dropped from the address and noted', async () => {
+    const {page, close} = await open({data: groupServer(), query: '?hostgroup=nope&hostgroup=databases'});
+    try {
+        const s = await groupState(page);
+        assert.equal(s.url, PAGE + '?hostgroup=databases');
+        assert.match(s.note, /Not offered in the module settings: nope/);
+    } finally {
+        await close();
+    }
+});
+
+test('no group picker when only the default is offered', async () => {
+    const {page, close} = await open({data: fixture('random40')});
+    try {
+        assert.equal((await groupState(page)).hidden, true);
+        assert.equal(await page.$eval('.topologygraph-picker-button', b => b.hidden), false, 'the host checklist stays');
+    } finally {
+        await close();
+    }
+});
+
+test('the explain link follows the selection and keeps what the graph lacks', async () => {
+    const {page, close} = await open({data: groupServer(), query: '?hostgroup=nope&hostgroup=databases&host=ghost'});
+    const href = () => page.$eval('.topologygraph-picker-explain', a => a.getAttribute('href'));
+    try {
+        assert.equal(await href(), PAGE + '/index/explain?host=ghost&hostgroup=databases&hostgroup=nope',
+            'dropped from the view, but still explained');
+        await page.click('.topologygraph-picker-button');
+        await page.click('.topologygraph-picker-list input[value="queue"]');
+        await page.waitForTimeout(200);
+        assert.equal(await href(), PAGE + '/index/explain?host=queue&host=ghost&hostgroup=databases&hostgroup=nope');
+        assert.equal(await page.$eval('.topologygraph-picker-explain', a => a.target), '_blank');
     } finally {
         await close();
     }

@@ -6,7 +6,7 @@ namespace Icinga\Module\Topologygraph\Common;
  * Fetches just what the graph needs from the Icinga 2 API, in small requests
  * filtered on the Icinga side, and builds the graph with GraphBuilder:
  *
- * 1. the hosts in the group
+ * 1. the hosts in the group(s)
  * 2. the host-to-host dependencies that touch them
  * 3. the hosts outside the group at the other end of those dependencies
  * 4. the host-to-host dependencies between those outside hosts (adds lines
@@ -26,7 +26,7 @@ final class GraphSource
 
     /**
      * @param callable $api      function (string $endpoint, array $body): array of API results
-     * @param string   $group    Host group to draw
+     * @param string|string[] $group Host group(s) to draw
      * @param string   $hostPath Icinga Web URL prefix for a host's detail page
      * @param callable $onServiceError Optional: called with the exception if services can't be fetched
      *
@@ -34,13 +34,11 @@ final class GraphSource
      */
     public static function fetch(callable $api, $group, $hostPath, ?callable $onServiceError = null)
     {
-        $groupHosts = $api(
-            'objects/hosts?' . self::HOST_ATTRS,
-            ['filter' => 'group in host.groups', 'filter_vars' => ['group' => $group]]
-        );
+        $groups = array_values(array_unique(array_map('strval', (array) $group)));
+        $groupHosts = $api('objects/hosts?' . self::HOST_ATTRS, self::inGroups($groups));
         $groupNames = self::names($groupHosts);
         if (! $groupNames) {
-            return GraphBuilder::build(GraphBuilder::select([], [], $group), [], [], $hostPath);
+            return GraphBuilder::build(GraphBuilder::select([], [], $groups), [], [], $hostPath);
         }
 
         $dependencies = $api(
@@ -52,7 +50,7 @@ final class GraphSource
             ]
         );
 
-        $selection = GraphBuilder::select($groupHosts, $dependencies, $group);
+        $selection = GraphBuilder::select($groupHosts, $dependencies, $groups);
 
         $neighbours = array_values(array_diff($selection['names'], $groupNames));
         $neighbourHosts = $neighbours ? $api(
@@ -87,6 +85,27 @@ final class GraphSource
         }
 
         return GraphBuilder::build($selection, array_merge($groupHosts, $neighbourHosts), $services, $hostPath);
+    }
+
+    /**
+     * API filter for the hosts in any of the groups
+     *
+     * @param string[] $groups
+     *
+     * @return array
+     */
+    public static function inGroups(array $groups)
+    {
+        if (count($groups) === 1) {
+            return ['filter' => 'group in host.groups', 'filter_vars' => ['group' => $groups[0]]];
+        }
+        $terms = $vars = [];
+        foreach ($groups as $i => $group) {
+            $terms[] = 'group' . $i . ' in host.groups';
+            $vars['group' . $i] = $group;
+        }
+
+        return ['filter' => implode(' || ', $terms), 'filter_vars' => $vars];
     }
 
     private static function names(array $hosts)

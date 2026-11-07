@@ -66,7 +66,21 @@ check('services are fetched for every drawn host', $requests[3]['vars'], ['names
 check('graph has the group hosts and their neighbour', $names, ['probe-a', 'probe-b', 'web-1']);
 check('links from the dependencies', count($graph['links']), 2);
 check('neighbour carries its service summary', $graph['nodes'][2]['services']['worst_unhandled'], 'critical');
-check('group membership', array_column($graph['nodes'], 'synthetic'), [true, true, false]);
+check('group membership', array_column($graph['nodes'], 'member'), [true, true, false]);
+
+// Several groups: hosts in any of them, all members
+$requests = [];
+$several = GraphSource::fetch(fakeApi(['hosts' => function ($body) {
+    return strpos($body['filter'], '||') !== false
+        ? [host('probe-a', ['groups' => ['web-checks']]), host('db-1', ['groups' => ['databases']])]
+        : array_map('host', $body['filter_vars']['names']);
+}] + $answers, $requests), ['web-checks', 'databases'], '/host?name=');
+check('several groups: one host request for all of them', [$requests[0]['filter'], $requests[0]['vars']], [
+    'group0 in host.groups || group1 in host.groups', ['group0' => 'web-checks', 'group1' => 'databases']
+]);
+check('several groups: members of each', array_column(array_filter($several['nodes'], function ($n) {
+    return $n['member'];
+}), 'name'), ['probe-a', 'db-1']);
 
 // An empty group: one request, empty graph
 $requests = [];

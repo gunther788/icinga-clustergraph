@@ -183,29 +183,39 @@ test('arrows to or from hosts outside the group are gray', async () => {
     }
 });
 
-test('selecting a host group changes what is shown, not how it is drawn', async () => {
-    // db-1 is not in the configured group, but in "databases"; its parents
-    // web-1 and api-1 are in the configured group
-    const data = fixture('small');
-    data.nodes.forEach(n => { n.groups = n.synthetic ? ['synthetic'] : []; });
-    Object.assign(data.nodes.find(n => n.name === 'db-1'), {synthetic: false, groups: ['databases']});
+test('hosts of the graphed host groups are drawn as members', async () => {
+    // db-1 is in "databases"; graphing that group makes it a member
+    const base = fixture('small');
+    base.nodes.forEach(n => { n.groups = n.synthetic ? ['synthetic'] : []; delete n.synthetic; });
+    base.nodes.find(n => n.name === 'db-1').groups = ['databases'];
+    const data = params => {
+        const graphed = params.getAll('hostgroup').length ? params.getAll('hostgroup') : ['synthetic'];
+        return Object.assign({}, base, {
+            nodes: base.nodes.map(n => Object.assign({}, n, {member: n.groups.some(g => graphed.includes(g))})),
+            hostgroups: graphed
+        });
+    };
     const label = (page, name) => page.$eval(`.topologygraph-viewport a[href="#${name}"]`, a => ({
         weight: a.querySelector('text').getAttribute('font-weight'),
-        dashed: a.querySelector('circle:last-of-type').getAttribute('stroke') !== 'none',
         title: a.querySelector('title').textContent
     }));
 
-    for (const query of ['', '?hostgroup=databases']) {
-        const {page, errors, close} = await open({data, query});
-        try {
-            const db = await label(page, 'db-1');
-            assert.deepEqual([db.weight, db.dashed], ['normal', true], `${query || 'no selection'}: still drawn as outside the group`);
-            assert.match(db.title, /not in the synthetic host group$/m);
-            assert.ok((await arrowsInto(page))['db-1'].every(x => x.stroke === '#adb3bc'), 'arrows into it stay gray');
-            assert.deepEqual(errors, []);
-        } finally {
-            await close();
-        }
+    const plain = await open({data});
+    try {
+        const db = await label(plain.page, 'db-1');
+        assert.equal(db.weight, 'normal', 'outside the default group');
+        assert.match(db.title, /not in the synthetic host group$/m);
+        assert.ok((await arrowsInto(plain.page))['db-1'].every(x => x.stroke === '#adb3bc'), 'arrows into it gray');
+    } finally {
+        await plain.close();
+    }
+    const both = await open({data, query: '?hostgroup=synthetic&hostgroup=databases'});
+    try {
+        assert.equal((await label(both.page, 'db-1')).weight, 'bold', 'a member once its group is graphed');
+        assert.ok((await arrowsInto(both.page))['db-1'].every(x => x.stroke !== '#adb3bc'), 'arrows into it no longer gray');
+        assert.deepEqual(both.errors, []);
+    } finally {
+        await both.close();
     }
 });
 

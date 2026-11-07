@@ -87,7 +87,7 @@
      * unchanged, a refresh only needs to recolour the existing drawing.
      */
     function structureOf(data) {
-        const nodes = (data.nodes || []).map(n => [n.name, n.label, !!n.synthetic, n.link]).sort();
+        const nodes = (data.nodes || []).map(n => [n.name, n.label, !!(n.member !== undefined ? n.member : n.synthetic), n.link]).sort();
         const links = (data.links || []).map(l => [l.source, l.target]).sort();
         return JSON.stringify([nodes, links]);
     }
@@ -1047,12 +1047,26 @@
                 return;
             }
 
-            const url = window.location.pathname + "/index/data";
-            const load = () => fetch(url, {cache: "no-store", headers: {Accept: "application/json"}})
-                .then(response => {
-                    if (!response.ok) throw new Error("HTTP " + response.status);
-                    return response.json();
-                });
+            // The host groups to graph (none: the default from the settings).
+            // An answer for groups no longer chosen is dropped.
+            let hostGroups = readUrlState().hostgroups;
+            const STALE = {};
+            const load = () => {
+                const asked = hostGroups.join("\n");
+                const params = new URLSearchParams();
+                hostGroups.forEach(name => params.append("hostgroup", name));
+                const query = params.toString();
+                return fetch(window.location.pathname + "/index/data" + (query ? "?" + query : ""),
+                    {cache: "no-store", headers: {Accept: "application/json"}})
+                    .then(response => {
+                        if (!response.ok) throw new Error("HTTP " + response.status);
+                        return response.json();
+                    })
+                    .then(data => {
+                        if (hostGroups.join("\n") !== asked) throw STALE;
+                        return data;
+                    });
+            };
             const time = () => new Date().toLocaleTimeString();
 
             // Only one refresh loop at a time, even if Icinga renders us again
@@ -1060,7 +1074,21 @@
 
             // Build the (empty) viewport straight away, so there is something
             // to see while Icinga is asked for the data
-            const graph = this.mount(container);
+            // Other host groups chosen on the page: load their graph
+            const changeHostGroups = groups => {
+                hostGroups = groups;
+                graph.progress("Loading hosts from Icinga\u2026", 0.15);
+                load().then(data => {
+                    if (!graph.isConnected()) return;
+                    graph.setData(data, true);
+                    graph.setStatus("Updated " + time());
+                }).catch(error => {
+                    if (error !== STALE && graph.isConnected()) {
+                        graph.progressFailed("Could not load the host groups (" + error.message + ")");
+                    }
+                });
+            };
+            const graph = this.mount(container, {onHostGroups: changeHostGroups});
             graph.progress("Loading hosts from Icinga\u2026", 0.15);
 
             load().then(data => {
@@ -1093,8 +1121,8 @@
                             clearInterval(timer);
                             timer = setInterval(refresh, interval);
                         }
-                    }).catch(() => {
-                        if (graph.isConnected()) graph.setStatus("Update failed, retrying");
+                    }).catch(error => {
+                        if (error !== STALE && graph.isConnected()) graph.setStatus("Update failed, retrying");
                     }).finally(() => { busy = false; });
                 };
                 // Catch up straight away when the tab becomes visible again
@@ -1105,6 +1133,7 @@
                 this.stopRefresh = stop;
             }).catch(error => {
                 if (graph.isConnected()) {
+                    // (no STALE here: nothing can be chosen before the first answer)
                     graph.progressFailed("Could not load the graph (" + error.message + "). Reload the page to try again.");
                 }
             });
@@ -1127,7 +1156,7 @@
          * zoom around the pointer, drag to move; Shift + scroll also moves the
          * diagram.
          */
-        mount: function (container) {
+        mount: function (container, options = {}) {
             const navigation = document.getElementById("navigation");
             const textColor = (navigation && rgbToHex(getComputedStyle(navigation).getPropertyValue('color').trim())) || "#535353";
 
@@ -1275,20 +1304,13 @@
             // --- Data, subset and drawing ---------------------------------------
 
             let fullData = {nodes: [], links: []};
-            let hostGroup = "synthetic"; // from the module settings, sent with the data
+            let graphedGroups = []; // the host groups in the data, as the server chose them
+            let offeredGroups = []; // [{name, label}] that can be chosen
+            let ignoredGroups = []; // asked for, but not offered
             const urlState = readUrlState();
             let selected = urlState.hosts; // ticked host names
-            let selectedGroups = urlState.hostgroups; // ticked host groups
-            // A ticked group counts as ticking every drawn host in it
-            const selectionNames = () => {
-                const names = new Set(selected);
-                if (selectedGroups.length) {
-                    fullData.nodes.forEach(n => {
-                        if ((n.groups || []).some(group => selectedGroups.includes(group))) names.add(n.name);
-                    });
-                }
-                return [...names];
-            };
+            let selectedGroups = urlState.hostgroups; // chosen host groups (none: the default)
+            const selectionNames = () => selected;
             let notifiedOnly = urlState.notifiedOnly; // ignore services with notifications disabled
             let layout = urlState.layout; // "standard", "elk" or "hybrid"
             const updateUrl = () => writeUrlState({hosts: selected, hostgroups: selectedGroups, notifiedOnly, layout}, container);
@@ -1298,8 +1320,8 @@
             let drawn = null; // {structure, update(data)} for what is on screen
             let laidOutFor = {width: 0, height: 0};
 
-            // Nothing ticked: everything; otherwise the ticked hosts (and the
-            // hosts in ticked groups) and everything above them
+            // Nothing ticked: everything; otherwise the ticked hosts and
+            // everything above them
             const visibleData = () => {
                 const names = selectionNames();
                 return names.length ? subsetAbove(fullData, names) : fullData;
@@ -1319,13 +1341,16 @@
                 if (!hasData) return;
                 const token = ++drawToken;
                 const data = visibleData();
-                // Drawn as a member (bold, solid dot, blue arrows): hosts of the
-                // host group from the module settings. Selecting groups in the
-                // picker or URL only chooses what is shown, not how.
-                const nodes = (data.nodes || []).map(n => Object.assign({}, n, {inGroup: !!n.synthetic}));
+                // Drawn as a member (bold, solid dot, blue arrows): hosts in the
+                // graphed host groups (older servers called this "synthetic")
+                const nodes = (data.nodes || []).map(n => Object.assign({}, n, {
+                    inGroup: !!(n.member !== undefined ? n.member : n.synthetic)
+                }));
                 const links = data.links || [];
                 emptyMessage.hidden = nodes.length > 0;
-                emptyMessage.textContent = `No hosts found in the "${hostGroup}" host group.`;
+                emptyMessage.textContent = graphedGroups.length > 1
+                    ? `No hosts found in the host groups ${graphedGroups.join(", ")}.`
+                    : `No hosts found in the "${graphedGroups[0] || ""}" host group.`;
                 laidOutFor = {width: viewport.clientWidth, height: viewport.clientHeight};
                 const area = drawingArea();
                 if (!nodes.length) {
@@ -1489,7 +1514,9 @@
                         stateName(d) === "unreachable" ? "(down because a parent is down)" : null,
                         servicesText(serviceSummary(d), notifiedOnly),
                         d.zone ? "zone: " + d.zone : null,
-                        d.inGroup ? null : "not in the " + hostGroup + " host group"
+                        d.inGroup ? null : graphedGroups.length > 1
+                            ? "not in the host groups " + graphedGroups.join(", ")
+                            : "not in the " + graphedGroups[0] + " host group"
                     ].filter(Boolean).join("\n"));
                     const ringState = d => {
                         const summary = serviceSummary(d);
@@ -1618,8 +1645,8 @@
             const controls = document.createElement("div");
             controls.className = "topologygraph-controls";
 
-            // Subset picker: tick host groups and/or hosts without children to
-            // show only them and everything above them
+            // Subset picker: tick hosts without children to show only them
+            // and everything above them
             const pickerButton = document.createElement("button");
             pickerButton.type = "button";
             pickerButton.textContent = "All hosts \u25be";
@@ -1630,7 +1657,7 @@
             panel.hidden = true;
             const filter = document.createElement("input");
             filter.type = "search";
-            filter.placeholder = "Filter groups and hosts";
+            filter.placeholder = "Filter hosts";
             const showAll = document.createElement("button");
             showAll.type = "button";
             showAll.textContent = "Show all";
@@ -1643,31 +1670,45 @@
                 h.textContent = text;
                 return h;
             };
-            const groupHeading = heading("Host groups");
-            const groupList = document.createElement("div");
-            groupList.className = "topologygraph-picker-list topologygraph-picker-groups";
-            const hostHeading = heading("Hosts");
+            const hostHeading = heading("Hosts without children");
             const list = document.createElement("div");
             list.className = "topologygraph-picker-list";
             const lists = document.createElement("div");
             lists.className = "topologygraph-picker-lists";
-            lists.append(groupHeading, groupList, hostHeading, list);
-            panel.append(panelHead, lists);
+            lists.append(hostHeading, list);
+            // The data behind the current view, with why each host is (or
+            // isn't) drawn, for comparing with Icinga or other inventories
+            const explainLink = document.createElement("a");
+            explainLink.className = "topologygraph-picker-explain";
+            explainLink.textContent = "Explain this view as JSON";
+            explainLink.title = "Which hosts are drawn and why, and which selected hosts are missing";
+            explainLink.target = "_blank";
+            explainLink.rel = "noopener";
+            const updateExplainLink = () => {
+                // Hosts from the page address that aren't in the graph are
+                // dropped from the selection; those are the ones most worth
+                // explaining, so keep them here
+                const inList = name => [...list.querySelectorAll("input")].some(box => box.value === name);
+                const hosts = new Set(selected.concat(urlState.hosts.filter(name => !inList(name))));
+                const params = new URLSearchParams();
+                hosts.forEach(name => params.append("host", name));
+                graphedGroups.concat(ignoredGroups).forEach(name => params.append("hostgroup", name));
+                const query = params.toString();
+                explainLink.href = window.location.pathname + "/index/explain" + (query ? "?" + query : "");
+            };
+            panel.append(panelHead, lists, explainLink);
 
             const applySelection = () => {
                 const parts = [];
-                if (selectedGroups.length === 1) parts.push(selectedGroups[0]);
-                if (selectedGroups.length > 1) parts.push(selectedGroups.length + " groups");
                 if (selected.length === 1) parts.push((fullData.nodes.find(n => n.name === selected[0]) || {label: selected[0]}).label);
                 if (selected.length > 1) parts.push(selected.length + " hosts");
                 pickerButton.textContent = (parts.length ? parts.join(", ") : "All hosts") + " \u25be";
                 list.querySelectorAll("input").forEach(box => box.checked = selected.includes(box.value));
-                groupList.querySelectorAll("input").forEach(box => box.checked = selectedGroups.includes(box.value));
                 updateUrl();
+                updateExplainLink();
             };
-            const choose = (names, groups) => {
+            const choose = names => {
                 selected = names;
-                selectedGroups = groups;
                 applySelection();
                 draw(null);
             };
@@ -1689,20 +1730,12 @@
                     pickerFor = structure;
                     const hosts = hostsWithoutChildren(fullData);
                     list.replaceChildren(...hosts.map(n => checkboxRow(n.name, n.label, n.label + " " + n.name)));
-                    // Every group any drawn host is in
-                    const groups = [...new Set([].concat(...fullData.nodes.map(n => n.groups || [])))]
-                        .sort((a, b) => d3.ascending(a, b));
-                    groupList.replaceChildren(...groups.map(group => checkboxRow(group, group, group)));
-                    groupHeading.hidden = groupList.hidden = !groups.length;
-                    pickerButton.hidden = !hosts.length && !groups.length;
+                    pickerButton.hidden = !hosts.length;
                     filterList();
                 }
-                // Drop selected hosts and groups that are gone (or hosts that
-                // now have children)
-                const available = container => new Set([...container.querySelectorAll("input")].map(box => box.value));
-                const hostNames = available(list), groupNames = available(groupList);
+                // Drop selected hosts that are gone (or now have children)
+                const hostNames = new Set([...list.querySelectorAll("input")].map(box => box.value));
                 selected = selected.filter(name => hostNames.has(name));
-                selectedGroups = selectedGroups.filter(name => groupNames.has(name));
                 applySelection();
             };
             const filterList = () => {
@@ -1710,10 +1743,9 @@
                 lists.querySelectorAll("label").forEach(row => row.hidden = !!text && !row.dataset.filter.includes(text));
             };
 
-            list.addEventListener("change", () => choose(ticked(list), selectedGroups));
-            groupList.addEventListener("change", () => choose(selected, ticked(groupList)));
+            list.addEventListener("change", () => choose(ticked(list)));
             filter.addEventListener("input", filterList);
-            showAll.addEventListener("click", () => choose([], []));
+            showAll.addEventListener("click", () => choose([]));
             const closePanel = () => { panel.hidden = true; };
             pickerButton.addEventListener("click", event => {
                 event.preventDefault();
@@ -1732,6 +1764,86 @@
             // from bubbling up to the document
             document.addEventListener("mousedown", onOutsideClick, true);
             panel.addEventListener("keydown", event => { if (event.key === "Escape") closePanel(); });
+
+            // Host group picker: which host groups to graph, from those the
+            // module settings offer. Changing them loads a new graph.
+            const groupButton = document.createElement("button");
+            groupButton.type = "button";
+            groupButton.className = "topologygraph-hostgroup-button";
+            groupButton.title = "Host groups to graph: their hosts, with their direct parents and children";
+            groupButton.hidden = true;
+            const groupPanel = document.createElement("div");
+            groupPanel.className = "topologygraph-picker topologygraph-hostgroup-picker";
+            groupPanel.hidden = true;
+            const groupFilter = document.createElement("input");
+            groupFilter.type = "search";
+            groupFilter.placeholder = "Filter host groups";
+            const groupDefault = document.createElement("button");
+            groupDefault.type = "button";
+            groupDefault.textContent = "Default";
+            const groupHead = document.createElement("div");
+            groupHead.className = "topologygraph-picker-head";
+            groupHead.append(groupFilter, groupDefault);
+            const groupList = document.createElement("div");
+            groupList.className = "topologygraph-hostgroup-list";
+            const groupLists = document.createElement("div");
+            groupLists.className = "topologygraph-picker-lists";
+            groupLists.append(heading("Host groups to graph"), groupList);
+            groupPanel.append(groupHead, groupLists);
+
+            let defaultGroup = null;
+            const showGroups = groups => {
+                groupList.querySelectorAll("input").forEach(box => box.checked = groups.includes(box.value));
+                const label = name => (offeredGroups.find(g => g.name === name) || {label: name}).label;
+                groupButton.textContent = (groups.length > 1 ? groups.length + " host groups" : label(groups[0] || "")) + " \u25be";
+            };
+            let groupsFor = null;
+            const updateGroupPicker = () => {
+                const key = JSON.stringify(offeredGroups);
+                if (key !== groupsFor) {
+                    groupsFor = key;
+                    groupList.replaceChildren(...offeredGroups.map(g => checkboxRow(
+                        g.name, g.label === g.name ? g.name : g.label + " (" + g.name + ")", g.label + " " + g.name
+                    )));
+                    filterGroups();
+                }
+                // Nothing to choose when only the default is offered
+                groupButton.hidden = offeredGroups.length < 2;
+                showGroups(graphedGroups);
+            };
+            const filterGroups = () => {
+                const text = groupFilter.value.trim().toLowerCase();
+                groupList.querySelectorAll("label").forEach(row => row.hidden = !!text && !row.dataset.filter.includes(text));
+            };
+            // Wait a moment after a tick, so ticking several groups loads once
+            let groupTimer = null;
+            const chooseGroups = groups => {
+                // Only the default chosen: same as choosing nothing
+                selectedGroups = groups.length === 1 && groups[0] === defaultGroup ? [] : groups;
+                showGroups(groups.length ? groups : [defaultGroup]);
+                updateUrl();
+                clearTimeout(groupTimer);
+                groupTimer = setTimeout(() => {
+                    if (options.onHostGroups) options.onHostGroups(selectedGroups);
+                }, 400);
+            };
+            groupList.addEventListener("change", () => chooseGroups(ticked(groupList)));
+            groupFilter.addEventListener("input", filterGroups);
+            groupDefault.addEventListener("click", () => chooseGroups([]));
+            groupButton.addEventListener("click", event => {
+                event.preventDefault();
+                groupPanel.hidden = !groupPanel.hidden;
+                if (!groupPanel.hidden) groupFilter.focus();
+            });
+            const onOutsideGroupClick = event => {
+                if (!viewport.isConnected) {
+                    document.removeEventListener("mousedown", onOutsideGroupClick, true);
+                    return;
+                }
+                if (!groupPanel.hidden && !groupPanel.contains(event.target) && event.target !== groupButton) groupPanel.hidden = true;
+            };
+            document.addEventListener("mousedown", onOutsideGroupClick, true);
+            groupPanel.addEventListener("keydown", event => { if (event.key === "Escape") groupPanel.hidden = true; });
             // Option: leave out services with notifications disabled
             const notifiedToggle = document.createElement("label");
             notifiedToggle.className = "topologygraph-toggle";
@@ -1764,8 +1876,8 @@
                 draw(null);
             });
 
-            controls.append(layoutPicker, notifiedToggle, pickerButton);
-            viewport.append(panel);
+            controls.append(layoutPicker, notifiedToggle, groupButton, pickerButton);
+            viewport.append(panel, groupPanel);
 
             const isFullscreen = () =>
                 (document.fullscreenElement || document.webkitFullscreenElement) === viewport;
@@ -1809,7 +1921,9 @@
             status.className = "topologygraph-status";
             const layoutNote = document.createElement("span");
             layoutNote.className = "topologygraph-note";
-            hint.append(layoutNote, status, "Scroll to zoom \u00b7 Drag or Shift + scroll to move");
+            const groupNote = document.createElement("span");
+            groupNote.className = "topologygraph-note";
+            hint.append(layoutNote, groupNote, status, "Scroll to zoom \u00b7 Drag or Shift + scroll to move");
             viewport.append(hint);
 
             // Legend for the colours, bottom left
@@ -1867,6 +1981,8 @@
                 item.append(icon, text);
                 legend.append(item);
             });
+            // "within the host groups" when several are graphed
+            const withinLegend = [...legend.childNodes].find(item => item.textContent === "within the host group").lastChild;
             viewport.append(legend);
 
             // --- Sizing ----------------------------------------------------------
@@ -1960,14 +2076,30 @@
                 progressFailed,
                 setStatus: text => { status.textContent = text ? text + " \u00b7 " : ""; },
                 // New data: recolour in place if the shown hosts and dependencies
-                // are unchanged, else re-lay out (keeping the user's view)
-                setData: data => {
+                // are unchanged, else re-lay out (keeping the user's view,
+                // unless other host groups were chosen: reset)
+                setData: (data, reset) => {
                     fullData = {nodes: data.nodes || [], links: data.links || []};
                     hasData = true;
-                    hostGroup = data.hostgroup || "synthetic";
+                    if (reset) userMoved = false;
+                    // Older servers sent one host group, and nothing to choose from
+                    graphedGroups = data.hostgroups || [data.hostgroup || "synthetic"];
+                    defaultGroup = data.hostgroup_default || graphedGroups[0];
+                    offeredGroups = data.hostgroups_offered || graphedGroups.map(name => ({name, label: name}));
+                    const ignored = ignoredGroups = data.hostgroups_ignored || [];
+                    if (ignored.length) {
+                        // Drop them from the address, as for unknown hosts
+                        selectedGroups = selectedGroups.filter(name => !ignored.includes(name));
+                        updateUrl();
+                    }
+                    groupNote.textContent = ignored.length
+                        ? "Not offered in the module settings: " + ignored.join(", ") + " \u00b7 "
+                        : "";
+                    withinLegend.textContent = graphedGroups.length > 1 ? "within the host groups" : "within the host group";
+                    updateGroupPicker();
                     updatePicker();
                     const visible = visibleData();
-                    if (drawn && structureOf(visible) === drawn.structure) {
+                    if (!reset && drawn && structureOf(visible) === drawn.structure) {
                         drawn.update(visible);
                     } else {
                         draw(drawn && userMoved ? d3.zoomTransform(svg.node()) : null);

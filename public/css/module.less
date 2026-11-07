@@ -91,7 +91,8 @@
     }
   }
 
-  .topologygraph-picker-button {
+  .topologygraph-picker-button,
+  .topologygraph-hostgroup-button {
     max-width: 16em;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -149,6 +150,21 @@
   }
 }
 
+// Link to the explained JSON at the foot of the picker
+.topologygraph-picker-explain {
+  margin-top: 6px;
+  padding-top: 4px;
+  font-size: 11px;
+  color: inherit;
+  opacity: 0.7;
+  border-top: 1px solid rgba(128, 128, 128, 0.3);
+
+  &:hover {
+    opacity: 1;
+    text-decoration: underline;
+  }
+}
+
 // Groups and hosts share one scrolling area
 .topologygraph-picker-lists {
   min-height: 0;
@@ -167,11 +183,8 @@
   }
 }
 
-.topologygraph-picker-groups {
-  margin-bottom: 4px;
-}
-
-.topologygraph-picker-list {
+.topologygraph-picker-list,
+.topologygraph-hostgroup-list {
   &[hidden] {
     display: none;
   }

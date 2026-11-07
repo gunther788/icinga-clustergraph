@@ -16,22 +16,23 @@ final class GraphBuilder
     /**
      * Pick the hosts to draw and the parent -> child links between them.
      *
-     * Every host in $group is drawn, plus any direct parent or child of one that
+     * Every host in one of $groups is drawn, plus any direct parent or child of one that
      * is outside the group, so chains don't break. Only host-to-host
      * dependencies are used; service dependencies are ignored.
      *
      * @param array  $hosts        API results from objects/hosts (with attrs.groups)
      * @param array  $dependencies API results from objects/dependencies
-     * @param string $group        Host group to draw
+     * @param string|string[] $groups Host group(s) to draw
      *
-     * @return array ['names' => string[], 'synthetic' => [name => true], 'links' => [['source', 'target']...]]
+     * @return array ['names' => string[], 'members' => [name => true], 'links' => [['source', 'target']...]]
      */
-    public static function select(array $hosts, array $dependencies, $group)
+    public static function select(array $hosts, array $dependencies, $groups)
     {
-        $synthetic = [];
+        $groups = array_map('strval', (array) $groups);
+        $members = [];
         foreach ($hosts as $host) {
-            if (in_array($group, $host['attrs']['groups'] ?? [], true)) {
-                $synthetic[(string) $host['name']] = true;
+            if (array_intersect($groups, array_map('strval', (array) ($host['attrs']['groups'] ?? [])))) {
+                $members[(string) $host['name']] = true;
             }
         }
 
@@ -46,13 +47,13 @@ final class GraphBuilder
             if ($parent === '' || $child === '' || $parent === $child) {
                 continue;
             }
-            if (! isset($synthetic[$parent]) && ! isset($synthetic[$child])) {
+            if (! isset($members[$parent]) && ! isset($members[$child])) {
                 continue;
             }
             $links[$parent . "\0" . $child] = ['source' => $parent, 'target' => $child];
         }
 
-        $names = $synthetic;
+        $names = $members;
         foreach ($links as $link) {
             $names[$link['source']] = true;
             $names[$link['target']] = true;
@@ -61,7 +62,7 @@ final class GraphBuilder
         return [
             // PHP turns numeric string keys into ints; cast them back
             'names'     => array_map('strval', array_keys($names)),
-            'synthetic' => $synthetic,
+            'members'   => $members,
             'links'     => array_values($links)
         ];
     }
@@ -196,7 +197,8 @@ final class GraphBuilder
                 'services'     => $serviceSummary === null ? null : ($serviceSummary[$name] ?? $noServices),
                 // The same, counting only services with notifications enabled
                 'services_notified' => $notifiedSummary === null ? null : ($notifiedSummary[$name] ?? $noServices),
-                'synthetic'    => isset($selection['synthetic'][$name]),
+                // In one of the host groups being graphed
+                'member'       => isset($selection['members'][$name]),
                 // Host groups the host is in, for selecting a subset by group
                 'groups'       => array_values(array_map('strval', (array) ($attrs['groups'] ?? []))),
                 'link'         => $hostPath . rawurlencode($name)

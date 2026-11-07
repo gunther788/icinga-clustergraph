@@ -1,7 +1,7 @@
 # Topology Graph for Icinga Web 2
 
-`topologygraph` is an Icinga Web 2 module that draws a **parent/child topology graph of the hosts in a host group**
-(`synthetic` by default), with their state, their service problems and live updates.
+`topologygraph` is an Icinga Web 2 module that draws a **parent/child topology graph of the hosts in one or more host
+groups** (`synthetic` by default, others chosen on the page), with their state, their service problems and live updates.
 
 It started as a fork of [sol1/icinga-clustergraph](https://github.com/sol1/icinga-clustergraph), which draws the
 Icinga 2 cluster: zones, the endpoints in each zone, and which zone reports to which parent. This fork reused that
@@ -14,16 +14,16 @@ module's settings page and API plumbing, then replaced what it draws. It was ren
 The upstream module asks the Icinga 2 API for zones and endpoints and draws them as a tree. This fork swaps both ends:
 
 - **Data:** `IndexController::dataAction()` asks the API for hosts, `Dependency` objects and services instead of
-  zones. It returns every host in the configured host group, plus any direct parent or child of one that is outside
+  zones. It returns every host in the chosen host groups, plus any direct parent or child of one that is outside
   the group, and the parent → child links between all of these, including between two hosts outside the group. Only host-to-host dependencies are used; service
   dependencies are ignored.
 - **Drawing:** `public/js/module.js` replaces the zone tree with a layered dependency graph built with D3, described
   below.
-- **Permissions:** the API user needs `objects/query/Host`, `objects/query/Dependency` and
-  `objects/query/Service` instead of the zone and endpoint permissions.
+- **Permissions:** the API user needs `objects/query/Host`, `objects/query/HostGroup`, `objects/query/Dependency`
+  and `objects/query/Service` instead of the zone and endpoint permissions.
 
-The settings page and the API connection work as they did upstream, with two new settings: the host group and the
-refresh interval.
+The settings page and the API connection work as they did upstream, with three new settings: the default host
+group, the host groups offered on the page, and the refresh interval.
 
 ## What the graph shows
 
@@ -35,14 +35,14 @@ refresh interval.
 - **Colours:** dots and names show host state: green for up, red for down, purple for unreachable (down only
   because a parent is down), blue for pending, grey for unknown. Problems that are acknowledged or in downtime are
   faded.
-- **Arrows:** blue between hosts of the group, gray when a host outside the group is at either end (a dependency
+- **Arrows:** blue between hosts of the graphed groups, gray when a host outside them is at either end (a dependency
   that ties other hosts into the graph). Both are drawn at the same width, opacity and lightness. An arrow into a host that is down or unreachable takes that host's colour
   either way.
 - **Service problems:** a ring around a host's dot shows its worst service problem: red for critical, orange for
   warning, purple for unknown. The ring is solid while any problem is unhandled, and dashed and faded when all of
   them are acknowledged or in downtime. A legend in the bottom-left corner explains the colours.
-- **Hosts outside the group:** they're drawn faded and in italics. "The group" here is the host group from the
-  module settings; selecting host groups in the picker or with `hostgroup=` only chooses which hosts are shown.
+- **Hosts outside the group:** they're drawn faded and in italics. "The group" is the host group being graphed, or
+  any of them when several are.
 - **Hovering a host:** highlights everything above and below it, along with the arrows on those chains, and dims
   the rest. The hover text shows the host's state, its service counts and its zone. Click a host to open it in
   Icinga Web.
@@ -60,24 +60,25 @@ The layout tries to:
   - Drag to move the diagram, or hold Shift and scroll.
 - **Buttons** (top right): zoom in, zoom out, **Fit** (the whole diagram), **1:1** (100%) and **Full screen** (Esc to
   leave).
-- **Showing a subset:** the host button (it reads **All hosts ▾** until you choose) opens a checklist with a filter
-  box and two sections:
-  - **Host groups:** every group that a drawn host belongs to. Ticking a group works exactly like ticking every
-    drawn host in it.
-  - **Hosts:** every host without children.
-
-  The graph shows the ticked hosts, and the hosts in ticked groups, plus everything above them: their parents, their
-  parents' parents, and so on. Groups and hosts can be combined. **Show all** goes back to everything.
-- **Bookmarking a subset:** the selection is kept in the page address as repeated `host` and `hostgroup`
-  parameters. Bookmark or share it like any other link, for example:
+- **Choosing host groups:** the host group button (it shows the group being graphed) lists the host groups offered
+  in the module settings, with a filter box. Tick one or several: the graph then has the hosts of all ticked
+  groups, drawn as members, plus the hosts with a direct dependency on one of them, drawn as outside hosts. Changing
+  the groups loads a new graph. **Default** goes back to the default host group. The button is hidden when the
+  settings offer only the default.
+- **Showing a subset:** the host button (it reads **All hosts ▾** until you choose) opens a checklist, with a filter
+  box, of every host without children in the graph. The graph then shows the ticked hosts plus everything above
+  them: their parents, their parents' parents, and so on. **Show all** goes back to everything.
+- **Bookmarking:** both choices are kept in the page address, as repeated `hostgroup` and `host` parameters.
+  Bookmark or share it like any other link, for example:
 
   ```
-  https://icinga.example.com/icingaweb2/topologygraph?host=db-1&host=cache-1
   https://icinga.example.com/icingaweb2/topologygraph?hostgroup=databases
-  https://icinga.example.com/icingaweb2/topologygraph?host=queue&hostgroup=databases
+  https://icinga.example.com/icingaweb2/topologygraph?hostgroup=databases&hostgroup=messaging
+  https://icinga.example.com/icingaweb2/topologygraph?host=db-1&host=cache-1&hostgroup=databases
   ```
 
-  Group names are the Icinga object names, not display names. Unknown hosts and groups in the address are ignored.
+  Group names are the Icinga object names, not display names. Unknown hosts are ignored, and so are host groups the
+  settings don't offer: the page drops them from the address and says so at the bottom.
 
 - **Ignoring services without notifications:** tick **Notified services only** to leave out services that have
   notifications disabled. They then don't count towards the service rings or the counts in the hover text. The
@@ -141,7 +142,7 @@ asks for reduced motion.
 
 - Icinga Web 2, with the icinga-php-library (0.11.0 or later)
 - Icinga 2 with the REST API enabled and an API user (see below)
-- A host group to draw (`synthetic` unless you choose another in the settings)
+- A host group to draw by default (`synthetic` unless you choose another in the settings)
 - Host parent/child relationships defined as Icinga 2 `Dependency` objects
 
 The graph is built from `Dependency` objects only. If your parents are kept in a custom variable, add an apply rule
@@ -176,7 +177,7 @@ apply Dependency "host-parent" for (parent in host.vars.parents) to Host {
    ```
    object ApiUser "topologygraph" {
      password = "change-me"
-     permissions = [ "objects/query/Host", "objects/query/Dependency", "objects/query/Service" ]
+     permissions = [ "objects/query/Host", "objects/query/HostGroup", "objects/query/Dependency", "objects/query/Service" ]
    }
    ```
 
@@ -184,29 +185,86 @@ apply Dependency "host-parent" for (parent in host.vars.parents) to Host {
 3. Fill in the settings:
    - **API user, password, endpoint (host name) and port** of the Icinga 2 API;
    - **Web UI:** where host links open, Icinga Web 2 (monitoring) or Icinga DB Web;
-   - **Host group:** the group to draw (default `synthetic`);
+   - **Default host group:** graphed until another is chosen on the page (default `synthetic`);
+   - **Offered host groups:** the host groups that can be chosen on the page, one pattern per line (see below);
    - **Refresh interval:** seconds between updates while the graph is open (default 15, at least 5).
 4. Save the changes, then open **Topology Graph** from the menu.
 
 Without `objects/query/Service` the graph still works, but without service rings. The hover text then says that
-service details are not available.
+service details are not available. Without `objects/query/HostGroup`, only the default host group is offered.
+
+### Offered host groups
+
+With many host groups, the page offers only those matching the patterns in **Offered host groups**, one per line,
+matched against the host group's object name:
+
+```
+synthetic
+app-*
+dc-?-backend
+!*-test
+```
+
+- A name without wildcards offers exactly that group.
+- `*` matches any characters, and `?` matches exactly one.
+- A line starting with `!` leaves out the groups it matches, even when another line matches them. Above, `app-shop`
+  is offered, but `app-shop-test` isn't.
+- The default host group is always offered.
+- Left empty, only the default host group is offered, which is how the module worked before this setting.
+
+This list is also the allowlist: a `hostgroup=` in the page address that isn't offered is ignored, so nobody can
+graph other host groups by editing the address. The patterns are matched on the Icinga side with `match()`, so only
+the matching groups are fetched, and the list is cached for five minutes. The settings page stores the patterns on
+one line, separated by commas.
 
 Font size and spacing are constants (`FONT_SIZE` and `BASE`) near the top of `public/js/module.js`.
+
+## Why is a host missing, or gray?
+
+The graph has the hosts in the graphed host groups, plus the hosts with a host-to-host dependency on one of them.
+Only hosts in the graphed groups are drawn as members (bold, blue arrows); all others are drawn as outside hosts
+(gray). So a host is missing if it has no dependency to or from a host of the graphed groups, and it is gray if it
+isn't in one of them itself. Ticking hosts in the host checklist only narrows the graph; it never adds hosts.
+
+To see this for your hosts, open **Explain this view as JSON** at the foot of the host checklist, or the address
+directly:
+
+```
+https://icinga.example.com/icingaweb2/topologygraph/index/explain?hostgroup=webservers&host=web-7
+```
+
+It takes the same `hostgroup` and `host` parameters as the graph page and returns:
+
+- `hosts`: every drawn host, with
+  - `drawn_as` (`member` or `outside`) and `why_drawn`, for example `in host group webservers` or `child of
+    probe-a`;
+  - `groups`, `parents` and `children`;
+  - `shown` and `why_shown` for the host selection, for example `selected` or `parent of shown host web-1`.
+- `links`: every line, and whether it `touches a member` or is `between two outside hosts`.
+- `selected_but_not_drawn`: the selected hosts that are not in the graph, with the reason and their host-to-host
+  dependencies.
+- `hostgroups_ignored`: groups in the address that the settings don't offer.
+
+For selected hosts that aren't drawn, this makes two more API requests (those hosts and their dependencies), which
+are not cached.
 
 ## Load on the Icinga API
 
 Each update makes up to five small requests, each filtered on the Icinga side:
 
-1. the hosts in the group;
+1. the hosts in the graphed groups;
 2. the host-to-host dependencies that touch them;
-3. the hosts outside the group at the other end of those dependencies;
+3. the hosts outside the groups at the other end of those dependencies;
 4. the dependencies between those outside hosts, for example between a host in the DMZ and one in the backend. This
    adds lines between hosts that are already drawn, never more hosts;
 5. the services of all drawn hosts.
 
-The finished graph is cached on the Icinga Web server for half the refresh interval, in a folder in the system's
-temporary directory. Several people with the page open therefore share one set of requests. Failed requests are
-not cached.
+The finished graph is cached on the Icinga Web server for half the refresh interval, separately for each combination
+of host groups, in a folder in the system's temporary directory. Several people looking at the same host groups
+therefore share one set of requests. Failed requests are not cached.
+
+The list of offered host groups is one more request, cached for five minutes. It is made only when the settings
+offer more than the default host group.
 
 ## Upgrading from clustergraph
 
@@ -245,7 +303,14 @@ If you ran this fork under its old name, `clustergraph`:
    - bookmarks, which now start `…/topologygraph` instead of `…/clustergraph`;
    - Icinga Web roles that grant `module/clustergraph`, which should grant `module/topologygraph`.
 
-Add `objects/query/Service` to the API user's permissions if it doesn't have it yet.
+Add `objects/query/Service` and `objects/query/HostGroup` to the API user's permissions if it doesn't have them
+yet.
+
+### Bookmarks with `hostgroup=`
+
+`hostgroup=` used to narrow the graph of the configured host group to the hosts of another group, and everything
+above them. It now chooses which host groups to graph, so such a bookmark shows that group's hosts and their direct
+neighbours instead, and only if the group is offered in the settings. `host=` bookmarks work as before.
 
 ## Tests
 

@@ -29,7 +29,7 @@ class ModuleconfigForm extends ConfigForm
 
         $this->addElement('text', 'api_username', [
             'label' => 'API User',
-            'description' => 'Add a user in api-users.conf with these permissions:  permissions = [ "objects/query/Host", "objects/query/Dependency", "objects/query/Service" ]',
+            'description' => 'Add a user in api-users.conf with these permissions:  permissions = [ "objects/query/Host", "objects/query/HostGroup", "objects/query/Dependency", "objects/query/Service" ]',
             'required' => true,
         ]);
 
@@ -65,10 +65,21 @@ class ModuleconfigForm extends ConfigForm
         ]);
 
         $this->addElement('text', 'graph_hostgroup', [
-            'label' => 'Host group',
-            'description' => 'Hosts in this group are drawn, with their direct parents and children',
+            'label' => 'Default host group',
+            'description' => 'Graphed until another host group is chosen on the page. Hosts in the graphed groups'
+                . ' are drawn, with their direct parents and children',
             'value' => 'synthetic',
             'required' => true,
+        ]);
+
+        $this->addElement('textarea', 'graph_hostgroups', [
+            'label' => 'Offered host groups',
+            'description' => 'Host groups that can be chosen on the page, one per line, by object name. * matches'
+                . ' any characters and ? one; a line starting with ! leaves out the groups it matches, e.g.'
+                . ' "app-*" and "!*-test". Leave empty to offer only the default host group. Needs the'
+                . ' objects/query/HostGroup permission',
+            'rows' => 5,
+            'required' => false,
         ]);
 
         $this->addElement('number', 'graph_refresh', [
@@ -84,6 +95,11 @@ class ModuleconfigForm extends ConfigForm
     public function onRequest()
     {
         parent::onRequest();
+        // Stored comma-separated (the INI file keeps it on one line), shown one per line
+        $patterns = $this->getElement('graph_hostgroups');
+        if ($patterns !== null && strlen((string) $patterns->getValue())) {
+            $patterns->setValue(implode("\n", self::patternLines($patterns->getValue())));
+        }
         foreach ($this->getElements() as $element) {
             if ($element->getType() === 'Zend_Form_Element_Password' && strlen($element->getValue())) {
                 $element->setValue(static::$dummyPassword);
@@ -97,6 +113,9 @@ class ModuleconfigForm extends ConfigForm
     public function getValues($suppressArrayNotation = false)
     {
         $values = parent::getValues($suppressArrayNotation);
+        if (isset($values['graph_hostgroups'])) {
+            $values['graph_hostgroups'] = implode(', ', self::patternLines($values['graph_hostgroups']));
+        }
         $apiResource = "api";
         if ($apiResource !== null && $this->config->hasSection($apiResource)) {
 
@@ -121,4 +140,9 @@ class ModuleconfigForm extends ConfigForm
         return $values;
     }
 
+    /** Host group patterns, one per entry, from text with one per line or comma-separated */
+    private static function patternLines($text)
+    {
+        return array_values(array_filter(array_map('trim', preg_split('/[\r\n,]+/', (string) $text)), 'strlen'));
+    }
 }
